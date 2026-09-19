@@ -37,6 +37,8 @@ bool validMobile(const ovrMobile* mobile) {
     const auto& s = runtime();
     return mobile == &s.mobile && s.inVr && s.session != XR_NULL_HANDLE;
 }
+static bool symmetricFovDegrees(const XrFovf& first, const XrFovf& second,
+                                std::array<float, 2>& degrees);
 static bool load(const char* name, PFN_xrVoidFunction* target) {
     auto& s = runtime();
     return xrOk(s.xr.xrGetInstanceProcAddr(s.instance, name, target), name) && *target;
@@ -69,6 +71,8 @@ static void destroySession() {
     s.frameIndex = -1;
     s.frame = {XR_TYPE_FRAME_STATE};
     s.timeMapped = false;
+    s.locatedFovValid = false;
+    s.initialRecenterPending = false;
     s.timeOffset = 0;
 }
 static void shutdown() {
@@ -78,6 +82,12 @@ static void shutdown() {
     if (s.instance && s.xr.xrDestroyInstance) s.xr.xrDestroyInstance(s.instance);
     s.instance = XR_NULL_HANDLE;
     s.system = XR_NULL_SYSTEM_ID;
+    s.viewConfigurationFovExtension = false;
+    s.recommendedFovValid = false;
+    s.locatedFovValid = false;
+    s.recommendedFovDegrees = {};
+    s.locatedFovDegrees = {};
+    s.recenterCount = 0;
     if (s.activity && s.vm) {
         JNIEnv* env = nullptr;
         bool attached = false;
@@ -188,6 +198,8 @@ bool ensureSession(VkQueue preferredQueue) {
     s.xr.xrCreateReferenceSpace(s.session, &stage, &s.stageSpace);
     if (!input::initialize()) { destroySession(); return false; }
     s.trackingTransform = {{0, 0, 0, 1}, {0, 0, 0}};
+    s.centerEyeTransform = s.trackingTransform;
+    s.initialRecenterPending = true;
     return true;
 }
 bool beginFrame(int64_t index) {
@@ -219,6 +231,38 @@ bool beginFrame(int64_t index) {
         }
         s.timeMapped = true;
     }
+    if (s.initialRecenterPending) {
+        // OpenXR LOCAL need not be eye-level. Establish VrApi's initial yaw/position
+        // origin from a tracked, visible head before exposing it to the application.
+        XrSpaceLocation head{XR_TYPE_SPACE_LOCATION};
+        constexpr XrSpaceLocationFlags tracked =
+            XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+            XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+        if ((s.sessionState != XR_SESSION_STATE_VISIBLE && s.sessionState != XR_SESSION_STATE_FOCUSED) ||
+            !xrOk(s.xr.xrLocateSpace(s.viewSpace, s.localSpace, s.frame.predictedDisplayTime, &head), "initial eye-level origin") ||
+            (head.locationFlags & tracked) != tracked) {
+            endFrame(nullptr, 0);
+            return false;
+        }
+        const auto& q = head.pose.orientation;
+        const auto& p = head.pose.position;
+        const float yaw = std::atan2(2*(q.w*q.y + q.x*q.z), 1-2*(q.x*q.x+q.y*q.y));
+        if (!std::isfinite(yaw) || !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
+            endFrame(nullptr, 0);
+            return false;
+        }
+        const XrPosef origin{{0, std::sin(yaw/2), 0, std::cos(yaw/2)}, p};
+        XrSpace next = XR_NULL_HANDLE;
+        if (!referenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL, origin, next)) {
+            endFrame(nullptr, 0);
+            return false;
+        }
+        s.xr.xrDestroySpace(s.appSpace);
+        s.appSpace = next;
+        s.centerEyeTransform = s.trackingTransform = fromXrPose(origin);
+        s.initialRecenterPending = false;
+        ++s.recenterCount;
+    }
     XrViewLocateInfo info{XR_TYPE_VIEW_LOCATE_INFO};
     info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     info.displayTime = s.frame.predictedDisplayTime;
@@ -229,6 +273,8 @@ bool beginFrame(int64_t index) {
         endFrame(nullptr, 0);
         return false;
     }
+    s.locatedFovValid = symmetricFovDegrees(
+        s.views[0].fov, s.views[1].fov, s.locatedFovDegrees);
     input::sync();
     return true;
 }
@@ -280,6 +326,28 @@ static ovrMatrix4f projection(const XrFovf& f) {
     // VrApi supplies the conventional GL-depth projection; CryEngine converts for Vulkan.
     return {{{2/(r-l), 0, (r+l)/(r-l), 0}, {0, 2/(u-d), (u+d)/(u-d), 0}, {0, 0, -1, -0.2f}, {0, 0, -1, 0}}};
 }
+static bool symmetricFovDegrees(const XrFovf& first, const XrFovf& second,
+                                std::array<float, 2>& degrees) {
+    auto valid = [](const XrFovf& fov) {
+        constexpr float limit = 1.57079632679f;
+        return std::isfinite(fov.angleLeft) && std::isfinite(fov.angleRight) &&
+               std::isfinite(fov.angleUp) && std::isfinite(fov.angleDown) &&
+               fov.angleLeft > -limit && fov.angleRight < limit &&
+               fov.angleDown > -limit && fov.angleUp < limit &&
+               fov.angleLeft < fov.angleRight && fov.angleDown < fov.angleUp;
+    };
+    if (!valid(first) || !valid(second)) return false;
+    const float horizontalHalf = std::max({
+        std::abs(first.angleLeft), std::abs(first.angleRight),
+        std::abs(second.angleLeft), std::abs(second.angleRight)});
+    const float verticalHalf = std::max({
+        std::abs(first.angleDown), std::abs(first.angleUp),
+        std::abs(second.angleDown), std::abs(second.angleUp)});
+    constexpr float degreesPerRadian = 57.295779513f;
+    degrees = {2.0f * horizontalHalf * degreesPerRadian,
+               2.0f * verticalHalf * degreesPerRadian};
+    return true;
+}
 }
 using namespace ovp;
 #define LOCK_STATE auto& s = runtime(); std::lock_guard<std::recursive_mutex> lock(s.mutex)
@@ -318,6 +386,8 @@ VRAPI int vrapi_Initialize(const ovrInitParms* parms) {
         if (!has(required)) { OVP_ERROR("Required OpenXR extension missing: %s", required); shutdown(); return -4; }
         extensions.push_back(required);
     }
+    s.viewConfigurationFovExtension = has(XR_EPIC_VIEW_CONFIGURATION_FOV_EXTENSION_NAME);
+    if (s.viewConfigurationFovExtension) extensions.push_back(XR_EPIC_VIEW_CONFIGURATION_FOV_EXTENSION_NAME);
     for (const char* optional : {XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME, XR_FB_COLOR_SPACE_EXTENSION_NAME, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME}) if (has(optional)) extensions.push_back(optional);
     XrInstanceCreateInfoAndroidKHR android{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     android.applicationVM = s.vm;
@@ -337,8 +407,16 @@ VRAPI int vrapi_Initialize(const ovrInitParms* parms) {
     if (!xrOk(s.xr.xrGetSystem(s.instance, &system, &s.system), "xrGetSystem")) { shutdown(); return -4; }
     XrGraphicsRequirementsVulkanKHR requirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR};
     if (!xrOk(s.xr.xrGetVulkanGraphicsRequirementsKHR(s.instance, s.system, &requirements), "xrGetVulkanGraphicsRequirementsKHR")) { shutdown(); return -4; }
-    for (auto& view : s.viewConfig) view = {XR_TYPE_VIEW_CONFIGURATION_VIEW};
+    for (size_t eye = 0; eye < s.viewConfig.size(); ++eye) {
+        s.viewConfigFov[eye] = {XR_TYPE_VIEW_CONFIGURATION_VIEW_FOV_EPIC};
+        s.viewConfig[eye] = {XR_TYPE_VIEW_CONFIGURATION_VIEW};
+        if (s.viewConfigurationFovExtension) s.viewConfig[eye].next = &s.viewConfigFov[eye];
+    }
     if (!xrOk(s.xr.xrEnumerateViewConfigurationViews(s.instance, s.system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 2, &count, s.viewConfig.data()), "xrEnumerateViewConfigurationViews") || count != 2) { shutdown(); return -4; }
+    s.recommendedFovValid = s.viewConfigurationFovExtension &&
+        symmetricFovDegrees(s.viewConfigFov[0].recommendedFov,
+                            s.viewConfigFov[1].recommendedFov,
+                            s.recommendedFovDegrees);
     s.colorSpaceExtension = has(XR_FB_COLOR_SPACE_EXTENSION_NAME);
     s.performanceExtension = has(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     s.threadExtension = has(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
@@ -390,6 +468,11 @@ VRAPI ovrMobile* vrapi_EnterVrMode(const ovrModeParms* parms) {
         if (!pollEvents() || std::chrono::steady_clock::now() >= deadline) { destroySession(); return nullptr; }
         if (!s.running) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    while (s.initialRecenterPending) {
+        if (beginFrame(s.frameIndex + 1)) break;
+        if (std::chrono::steady_clock::now() >= deadline) { destroySession(); return nullptr; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     ++s.mobile.generation;
     s.inVr = true;
     OVP_LOG("Entered VR mode");
@@ -430,6 +513,7 @@ VRAPI ovrPosef vrapi_GetTrackingTransform(ovrMobile* mobile, int which) {
     ovrPosef result{{0, 0, 0, 1}, {0, 0, 0}};
     if (!validMobile(mobile)) return result;
     if (which == 1) return s.trackingTransform;
+    if (which == 2) return s.centerEyeTransform;
     if (which == 3 && s.stageSpace) {
         if (!s.frameBegun && !beginFrame(s.frameIndex + 1)) return result;
         XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
@@ -442,7 +526,7 @@ VRAPI void vrapi_SetTrackingTransform(ovrMobile* mobile, ovrPosef pose) {
     if (!validMobile(mobile)) return;
     auto& q = pose.Orientation;
     if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !std::isfinite(q.w) || !std::isfinite(pose.Position.x) || !std::isfinite(pose.Position.y) || !std::isfinite(pose.Position.z)) return;
-    float yaw = std::atan2(2*(q.w*q.y + q.x*q.z), 1-2*(q.y*q.y+q.z*q.z));
+    float yaw = std::atan2(2*(q.w*q.y + q.x*q.z), 1-2*(q.x*q.x+q.y*q.y));
     q = {0, std::sin(yaw/2), 0, std::cos(yaw/2)};
     XrSpace next = XR_NULL_HANDLE;
     if (referenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL, toXrPose(pose), next)) {
@@ -455,7 +539,7 @@ VRAPI int vrapi_GetSystemPropertyInt(const ovrJava*, int property) {
     LOCK_STATE;
     if (!s.instance) return 0;
     switch (property) {
-        case 0: return 256; // VrApi standalone six-degree-of-freedom device class.
+        case 0: return 259; // VRAPI_DEVICE_TYPE_OCULUSQUEST, not the 256 range-start marker.
         case 1: return 1; // Adapter swapchains are single-sampled; application MSAA resolves into them.
         case 2: return int(s.viewConfig[0].recommendedImageRectWidth * 2);
         case 3: return int(s.viewConfig[0].recommendedImageRectHeight);
@@ -471,9 +555,11 @@ VRAPI float vrapi_GetSystemPropertyFloat(const ovrJava*, int property) {
     LOCK_STATE;
     if (property == 4) return s.frame.predictedDisplayPeriod > 0 ? float(1e9 / double(s.frame.predictedDisplayPeriod)) : 0;
     if (property == 7 || property == 8) {
-        if (!s.timeMapped) return 90.0f; // Conservative projection coverage before tracking is available.
-        auto f = s.views[0].fov;
-        return (property == 7 ? f.angleRight - f.angleLeft : f.angleUp - f.angleDown) * 57.295779513f;
+        const size_t axis = static_cast<size_t>(property - 7);
+        // Live optical FOV supersedes a provisional startup recommendation.
+        if (s.locatedFovValid) return s.locatedFovDegrees[axis];
+        if (s.recommendedFovValid) return s.recommendedFovDegrees[axis];
+        return 90.0f;
     }
     OVP_LOG("Unsupported float system property %d", property);
     return 0;
@@ -482,6 +568,7 @@ VRAPI int vrapi_GetSystemStatusInt(const ovrJava*, int status) {
     LOCK_STATE;
     if (status == 0) return s.instance != XR_NULL_HANDLE;
     if (status == 1) return s.sessionState == XR_SESSION_STATE_FOCUSED;
+    if (status == 13) return static_cast<int>(s.recenterCount);
     if (status == 14) return s.running && s.sessionState != XR_SESSION_STATE_FOCUSED;
     if (status == 130) return 1;
     return 0;

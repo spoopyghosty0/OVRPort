@@ -350,7 +350,13 @@ bool initialize() {
         XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
         spaceInfo.action = g.actions.gripPose;
         spaceInfo.subactionPath = g.handPaths[hand];
-        spaceInfo.poseInActionSpace.orientation.w = 1.0f;
+        // VrApi expects the legacy Touch pose, not OpenXR grip. Invert MetaXR's
+        // OculusPoseToGrip transform: +60 degrees about X and (0, -0.03, 0.04)m
+        // in OpenXR coordinates. Both hands use the same local rigid transform.
+        spaceInfo.poseInActionSpace = {
+            {-0.5f, 0.0f, 0.0f, 0.8660254038f},
+            {0.0f, -0.0196410162f, -0.0459807621f},
+        };
         if (!xrOk(s.xr.xrCreateActionSpace(s.session, &spaceInfo, &g.hands[hand].gripSpace),
                   "xrCreateActionSpace")) {
             destroyState(false);

@@ -82,12 +82,24 @@ sampled texture is **not** a fragment-density attachment or an implementation
 of Vulkan shading-rate extensions. No foveation backend is required for this
 full-rate resource compatibility path.
 
+Initial eye-level tracking waits for a valid tracked head pose in a visible
+session, establishes a yaw/position origin, and reports that change through the
+recenter counter. Heading extraction accounts for headset pitch. Legacy Touch
+controller poses use the inverse of Meta's native-to-grip rigid transform rather
+than returning raw OpenXR grip poses. The adapter reports the concrete Quest
+compatibility identity (`259`), not a hardware-detected headset model.
+
 Fixed-to-view projections use OpenXR `VIEW` space and the runtime's head-relative
 per-eye poses, rather than timewarping the images from the application's render
 `HeadPose`. Ordinary projections retain their application-space behavior.
 This is generic VrApi compatibility, with no package-name checks. AXRB also
 needs matching updated guest/host components that preserve projection reference
 spaces through transport.
+
+Eye-FOV system properties use valid runtime recommendations from
+`XR_EPIC_view_configuration_fov` when available. Once views are located, their
+live optical FOV supersedes any provisional startup recommendation; rendering
+continues to use the located per-eye projections.
 
 Projection conversion accepts either sign of the vertical texture scale and
 preserves the image-edge tangent directions in core OpenXR `XrFovf`. For
