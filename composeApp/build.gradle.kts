@@ -1,7 +1,11 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-val appVersion: String by project
+val appVersion = providers.gradleProperty("appVersion").get().also {
+    require(it.matches(Regex("""\d+\.\d+\.\d+"""))) {
+        "appVersion must be a numeric major.minor.patch version (received '$it')"
+    }
+}
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -65,6 +69,10 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            // Also invalidate Android's incremental resource merger on channel changes.
+            if (providers.gradleProperty("withVrApi").orNull != "true") {
+                excludes += "vrapi/**"
+            }
         }
     }
     buildTypes {
@@ -101,7 +109,7 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.AppImage, TargetFormat.Exe)
+            targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Exe)
             packageName = "overport"
             packageVersion = appVersion
 

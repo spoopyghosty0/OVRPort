@@ -109,11 +109,11 @@ class PatcherContext(
         args: Map<String, List<String>>,
         callback: (Int, Patch) -> Unit = { _, _ -> }
     ) {
+        val patches = PatchStore.select(args.keys)
+
         val librariesDir = VersionManager(patcherDirectory).getLibraries(overportVersion)
 
         val executor = PatchExecutor(librariesDir, workingDir, apk())
-
-        val patches = args.keys.mapNotNull { PatchStore.get(it) }
 
         patches.forEachIndexed { index, patch ->
             callback(index, patch)

@@ -25,6 +25,18 @@ object PatchStore {
         return all().filter { it.isRecommended }
     }
 
+    fun select(names: Iterable<String>): List<Patch> {
+        val requestedNames = names.toList()
+        val selectedNames = requestedNames.toSet()
+        require(
+            PATCH_VRAPI_OPENXR.name !in selectedNames ||
+                PATCH_REMOVE_VRAPI.name !in selectedNames
+        ) {
+            "${PATCH_VRAPI_OPENXR.name} conflicts with ${PATCH_REMOVE_VRAPI.name}; select only one."
+        }
+        return requestedNames.mapNotNull(::get)
+    }
+
     init {
         register(PATCH_COPY_LIBRARIES)
         register(PATCH_COPY_OVRPLUGIN_VRAPI)
@@ -43,6 +55,7 @@ object PatchStore {
         register(PATCH_MARK_AS_DEBUGGABLE)
         register(PATCH_MARK_ALLOW_BACKUP)
         register(PATCH_REMOVE_VRAPI)
+        register(PATCH_VRAPI_OPENXR)
         register(PATCH_REMOVE_UNREAL_FORCE_QUIT)
         register(PATCH_FORCE_PASSTHROUGH)
         register(PATCH_DISABLE_SPACE_WARP)
