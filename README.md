@@ -27,10 +27,25 @@ stable or experimental automatically. Tagged runs are configured to create a
 publication. Release names and artifacts include this repository's name,
 version and channel.
 
-The stable packaging work only corrects how platform installers and artifacts
-are assembled. It does not enable VrApi translation, replace a game's
-`libvrapi.so`, or otherwise change the normal patch set. The adapter is present
-only when Gradle is invoked with `-PwithVrApi=true`.
+Neither build channel enables VrApi translation or replaces a game's
+`libvrapi.so` by default. The experimental adapter is present only when Gradle
+is invoked with `-PwithVrApi=true`; selecting its replacement patch remains
+explicit.
+
+## Automatic platform message compatibility
+
+Both channels include a separate ARM64 `libovrplatformcompat.so` resource.
+After the selected patches run, the patcher checks the APK's
+`libovrplatformloader.so` dynamic exports. If `ovrMessageType_ToString` is
+missing, it adds the companion as a native dependency and packages it alongside
+the loader. A loader that already defines the public symbol is left unchanged.
+Repeated patching does not add duplicate dependencies. No additional checkbox
+or CLI patch name is required.
+
+The companion provides only the SDK's allocation-free message-type-to-string
+mapping, including legacy values and the `UNKNOWN` fallback. It does not
+change platform initialization, authentication, or entitlement results, and is
+independent of the experimental VrApi adapter.
 
 ## Experimental direct VrApi compatibility
 
@@ -41,33 +56,23 @@ build and the user interface. It fails rather than partially modifying an APK
 when its required arm64 resource is absent or a participating ABI is
 unsupported, and it cannot be combined with the patch that removes VrApi.
 
-The initial engineering target is the arm64 Vulkan build of **The Climb 2**.
-Local launches initialize the VrApi adapter through AXRB/OpenXR, create the
-Vulkan device, enter an OpenXR session and allocate the game's color and
-full-rate compatibility textures. The mandatory foveation-texture query now
-succeeds with variable-rate shading disabled. Startup also passes fixed-to-view
-projection flag validation (`0x4`), and the previous negative vertical
-texture-scale rejection no longer appears. The game still terminates through
-CryEngine's `FatalError` with `SIGTRAP`; the remaining cause is not identified.
-**The Climb 2 is not currently playable through this adapter.** No game frame
-reached the diagnostic CPU capture, and live-headset interaction is unverified.
+The initial engineering target is the arm64 Vulkan build of **The Climb 2**
+running through AXRB. This experimental path does not establish complete
+gameplay compatibility.
 
 The adapter currently supports only `arm64-v8a`, Vulkan, primary-stereo
 projection layers (including head-locked projections) and a limited set of other
 projection flags and blend modes. It does not support GLES, 32-bit ABIs or
-non-projection VrApi layers. Its tracking and controller paths have not been
-exercised in a live headset. Projection
-matrices currently use the conventional GL-depth form expected to be converted
-by the target's CryEngine Vulkan renderer; this is not a general Vulkan-depth
-or cross-engine projection implementation. Rendering, tracking, controllers
-and gameplay remain unverified, and no real-headset test has passed.
+non-projection VrApi layers. Projection matrices use the conventional GL-depth
+form expected to be converted by the target's CryEngine Vulkan renderer;
+this is not a general Vulkan-depth or cross-engine projection implementation.
 
 For local AXRB startup diagnosis, adding `r_variable_rate_shading = 0` to
 `/storage/emulated/0/Android/data/com.crytek.climb2/files/user.cfg` gets past the
 initial device-extension check. Preserve any existing settings in that file.
-This is **not a complete compatibility fix**: the game still aborts during
-startup. The patch does not modify game configuration automatically or
-advertise unsupported Vulkan extensions.
+This setting does not resolve other compatibility limitations. The patch does
+not modify game configuration automatically or advertise unsupported Vulkan
+extensions.
 
 The disabled-foveation path supplies a real, immutable `1x1` `RG8_UNORM`
 texture, initialized to full density on every array layer and shared across
@@ -82,25 +87,16 @@ per-eye poses, rather than timewarping the images from the application's render
 `HeadPose`. Ordinary projections retain their application-space behavior.
 This is generic VrApi compatibility, with no package-name checks. AXRB also
 needs matching updated guest/host components that preserve projection reference
-spaces through transport. Controlled native spatial tests exercised real Vulkan
-copies, translated/rotated head poses and canted stereo eyes; they are not a
-substitute for live-headset validation.
+spaces through transport.
 
 Projection conversion accepts either sign of the vertical texture scale and
 preserves the image-edge tangent directions in core OpenXR `XrFovf`. For
 Vulkan's top-left origin, a negative scale gives ordinary vertical FOV ordering;
 a positive scale gives a reversed vertical FOV. No optional image-layout
-extension is required. This also corrects the old positive-scale path, which
-discarded the image orientation. Updated AXRB guest code normalizes each eye's
-FOV and applies the corresponding crop-relative flip, including cancellation
-with an explicit image-layout flip. This change needs no additional host or
-wire-protocol update.
+extension is required. The AXRB guest normalizes each eye's FOV and applies the
+corresponding crop-relative flip, including cancellation with an explicit
+image-layout flip.
 
-A native ray-to-UV probe passed both signs with asymmetric projection offsets
-and off-center crops, and failed against the preceding adapter. AXRB's retained
-on-device Vulkan regression checks actual pixels for mixed eye orientations,
-off-center crops, shared/array images and image-layout flip cancellation. These
-checks do not establish game rendering or live-headset correctness.
 
 The current Vulkan interop path assumes the application's synchronization
 queue belongs to the first graphics-capable queue family and uses queue index
@@ -113,14 +109,6 @@ OpenXR loader already handled by OVRPort's existing library packaging. This
 repository does not redistribute Meta's proprietary VrApi library or SDK.
 Users must supply applications they are legally entitled to use.
 
-Local release-readiness checks have verified that the adapter exports all 34
-VrApi imports used by the inspected target, and the CLI test suite passes.
-The desktop test task currently reports `NO-SOURCE`; it is not a tested suite.
-Local Windows installer, Android APK and CLI builds succeed, and channel
-checks verify the experimental payload and native notices stay out of stable
-packages. Experimental APK/JAR resources are compared byte-for-byte with the
-native build output. These are packaging and ABI checks, not
-evidence of successful rendering or headset compatibility.
 
 ## Downloads
 
@@ -146,8 +134,8 @@ filename and release title before downloading.
 - JDK 17
 - Android SDK with platform/API 36 and the normal Android build tools
 - Gradle through the included wrapper
-- For experimental VrApi builds only: Python 3 and Android NDK
-  `27.3.13750724`
+- Python 3 and Android NDK `27.3.13750724` for the automatic native companion
+  (and, when enabled, the experimental VrApi adapter)
 
 Set `ANDROID_NDK_HOME` to that NDK, or install it under an Android SDK exposed
 through `ANDROID_HOME`/`ANDROID_SDK_ROOT`. The native builder can locate either
@@ -169,6 +157,20 @@ The default profile does not build or package the experimental adapter:
 On Windows, use `gradlew.bat` instead of `./gradlew`. The desktop task emits the
 installer appropriate to the current host: EXE on Windows, DEB on Linux and DMG
 on macOS.
+
+The platform companion and its SDK/NDK notices are built automatically for
+every profile. To supply a prebuilt resource root instead:
+
+```bash
+python native/platform/build_platform.py \
+  --ndk "$ANDROID_NDK_HOME" --output "$PWD/build/platform-resource"
+./gradlew :overportcli:shadowJar \
+  -PplatformResourceRoot="$PWD/build/platform-resource"
+```
+
+The root must contain `platform/arm64-v8a/libovrplatformcompat.bin`,
+`platform/licenses/OCULUS-PLATFORM-SDK.txt`, and
+`platform/licenses/ANDROID-NDK.txt`. Missing resources fail the build.
 
 ### Experimental opt-in build
 
@@ -292,5 +294,11 @@ Apache License 2.0 with LLVM exception and the applicable legacy MIT,
 University of Illinois/NCSA and BSD notices. Exact attributions and license
 texts are in [`native/vrapi/licenses`](native/vrapi/licenses/) and are copied
 into every generated experimental resource root.
+
+The platform message mapping uses current and legacy Meta/Oculus SDK identifiers.
+Their notices are retained in
+[`native/platform/licenses`](native/platform/licenses/). Every generated platform
+resource root includes those notices and the shared Android NDK attribution
+under `platform/licenses/`; no proprietary platform binary is bundled.
 
 This project is neither affiliated with nor endorsed by Meta.

@@ -69,6 +69,55 @@ application {
     mainClass = "moe.crx.overport.cli.CliMainKt"
 }
 
+val platformResourcePath = "platform/arm64-v8a/libovrplatformcompat.bin"
+val configuredPlatformRoot = providers.gradleProperty("platformResourceRoot").orNull
+val platformResourceRoot = configuredPlatformRoot?.let(rootProject::file)
+    ?: layout.buildDirectory.dir("generated/platformResources/main").get().asFile
+val platformPayload = platformResourceRoot.resolve(platformResourcePath)
+val platformResources = listOf(
+    platformPayload,
+    platformResourceRoot.resolve("platform/licenses/OCULUS-PLATFORM-SDK.txt"),
+    platformResourceRoot.resolve("platform/licenses/ANDROID-NDK.txt"),
+)
+val preparePlatformResource = if (configuredPlatformRoot != null) {
+    tasks.register("preparePlatformResource") {
+        inputs.files(platformResources).optional()
+        doLast {
+            for (resource in platformResources) {
+                if (!resource.isFile || resource.length() == 0L) {
+                    throw GradleException("Platform compatibility resource is missing or empty at ${resource.absolutePath}.")
+                }
+            }
+        }
+    }
+} else {
+    val sourceDirectory = rootProject.layout.projectDirectory.dir("native/platform")
+    val pythonExecutable = providers.gradleProperty("pythonExecutable")
+        .orElse(providers.environmentVariable("PYTHON"))
+        .orElse(if (System.getProperty("os.name").startsWith("Windows", true)) "python" else "python3")
+    tasks.register<Exec>("preparePlatformResource") {
+        description = "Builds the ARM64 platform message-type compatibility library."
+        inputs.files(rootProject.fileTree(sourceDirectory) {
+            exclude("build/**", "__pycache__/**", "*.pyc")
+        }).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.file(rootProject.layout.projectDirectory.file("native/vrapi/build.py"))
+        inputs.file(rootProject.layout.projectDirectory.file("native/vrapi/licenses/ANDROID-NDK.txt"))
+        inputs.property("pythonExecutable", pythonExecutable)
+        inputs.property("androidNdkHome", providers.environmentVariable("ANDROID_NDK_HOME").orElse(""))
+        inputs.property("androidHome", providers.environmentVariable("ANDROID_HOME").orElse(""))
+        inputs.property("androidSdkRoot", providers.environmentVariable("ANDROID_SDK_ROOT").orElse(""))
+        outputs.files(platformResources)
+        commandLine(
+            pythonExecutable.get(),
+            sourceDirectory.file("build_platform.py").asFile.absolutePath,
+            "--output", platformResourceRoot.absolutePath,
+        )
+    }
+}
+sourceSets.main {
+    output.dir(mapOf("builtBy" to preparePlatformResource), platformResourceRoot)
+}
+
 val withVrApi = providers.gradleProperty("withVrApi")
     .map { value ->
         value.toBooleanStrictOrNull()

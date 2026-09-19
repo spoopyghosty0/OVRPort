@@ -6,6 +6,7 @@ import com.reandroid.archive.ArchiveFile
 import com.reandroid.archive.FileInputSource
 import com.reandroid.archive.io.ZipFileInput
 import moe.crx.overport.config.OverportPatchedInfo
+import moe.crx.overport.patches.ensurePlatformMessageCompatibility
 import moe.crx.overport.utils.CantCheckoutException
 import moe.crx.overport.utils.NameFormatter
 import moe.crx.overport.versions.VersionManager
@@ -119,6 +120,8 @@ class PatcherContext(
             callback(index, patch)
             patch.executor(executor, args[patch.name] ?: listOf())
         }
+
+        ensurePlatformMessageCompatibility(workingDir)
 
         executor.selectConfig {
             patched = OverportPatchedInfo(
