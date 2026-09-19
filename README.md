@@ -46,11 +46,11 @@ Local launches initialize the VrApi adapter through AXRB/OpenXR, create the
 Vulkan device, enter an OpenXR session and allocate the game's color and
 full-rate compatibility textures. The mandatory foveation-texture query now
 succeeds with variable-rate shading disabled. Startup also passes fixed-to-view
-projection flag validation (`0x4`), but the following ordinary projection uses a
-negative vertical texture scale that the current conversion does not support.
-The game subsequently terminates with `SIGTRAP`. **The Climb 2 is not currently
-playable through this adapter.** No presented game frame or live-headset
-interaction has been verified.
+projection flag validation (`0x4`), and the previous negative vertical
+texture-scale rejection no longer appears. The game still terminates through
+CryEngine's `FatalError` with `SIGTRAP`; the remaining cause is not identified.
+**The Climb 2 is not currently playable through this adapter.** No game frame
+reached the diagnostic CPU capture, and live-headset interaction is unverified.
 
 The adapter currently supports only `arm64-v8a`, Vulkan, primary-stereo
 projection layers (including head-locked projections) and a limited set of other
@@ -65,9 +65,9 @@ and gameplay remain unverified, and no real-headset test has passed.
 For local AXRB startup diagnosis, adding `r_variable_rate_shading = 0` to
 `/storage/emulated/0/Android/data/com.crytek.climb2/files/user.cfg` gets past the
 initial device-extension check. Preserve any existing settings in that file.
-This is **not a complete compatibility fix**: negative vertical texture scales
-remain unsupported by the projection conversion. The patch does not modify
-game configuration automatically or advertise unsupported Vulkan extensions.
+This is **not a complete compatibility fix**: the game still aborts during
+startup. The patch does not modify game configuration automatically or
+advertise unsupported Vulkan extensions.
 
 The disabled-foveation path supplies a real, immutable `1x1` `RG8_UNORM`
 texture, initialized to full density on every array layer and shared across
@@ -85,6 +85,22 @@ needs matching updated guest/host components that preserve projection reference
 spaces through transport. Controlled native spatial tests exercised real Vulkan
 copies, translated/rotated head poses and canted stereo eyes; they are not a
 substitute for live-headset validation.
+
+Projection conversion accepts either sign of the vertical texture scale and
+preserves the image-edge tangent directions in core OpenXR `XrFovf`. For
+Vulkan's top-left origin, a negative scale gives ordinary vertical FOV ordering;
+a positive scale gives a reversed vertical FOV. No optional image-layout
+extension is required. This also corrects the old positive-scale path, which
+discarded the image orientation. Updated AXRB guest code normalizes each eye's
+FOV and applies the corresponding crop-relative flip, including cancellation
+with an explicit image-layout flip. This change needs no additional host or
+wire-protocol update.
+
+A native ray-to-UV probe passed both signs with asymmetric projection offsets
+and off-center crops, and failed against the preceding adapter. AXRB's retained
+on-device Vulkan regression checks actual pixels for mixed eye orientations,
+off-center crops, shared/array images and image-layout flip cancellation. These
+checks do not establish game rendering or live-headset correctness.
 
 The current Vulkan interop path assumes the application's synchronization
 queue belongs to the first graphics-capable queue family and uses queue index

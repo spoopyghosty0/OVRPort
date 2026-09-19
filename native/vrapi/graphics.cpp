@@ -453,7 +453,7 @@ bool projectionGeometry(const ovrMatrix4f& matrix, const ovrRectf& rect,
     const float tx = matrix.M[0][2];
     const float ty = matrix.M[1][2];
     if (!finite(sx) || !finite(sy) || !finite(tx) || !finite(ty) ||
-        sx <= 0.000001f || sy <= 0.000001f ||
+        sx <= 0.000001f || std::fabs(sy) <= 0.000001f ||
         std::fabs(matrix.M[0][1]) > 0.000001f ||
         std::fabs(matrix.M[1][0]) > 0.000001f ||
         !finite(rect.x) || !finite(rect.y) || !finite(rect.width) ||
@@ -468,8 +468,10 @@ bool projectionGeometry(const ovrMatrix4f& matrix, const ovrRectf& rect,
     const float y1 = (rect.y + rect.height + ty) / sy;
     fov.angleLeft = std::atan(std::min(x0, x1));
     fov.angleRight = std::atan(std::max(x0, x1));
-    fov.angleDown = std::atan(std::min(y0, y1));
-    fov.angleUp = std::atan(std::max(y0, y1));
+    // Vulkan images start at the top-left. Preserve the tangent direction at
+    // each image edge: OpenXR reverses the image when angleDown > angleUp.
+    fov.angleUp = std::atan(y0);
+    fov.angleDown = std::atan(y1);
 
     const int32_t left = std::max(0, static_cast<int32_t>(std::floor(rect.x * width)));
     const int32_t top = std::max(0, static_cast<int32_t>(std::floor(rect.y * height)));
