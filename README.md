@@ -42,14 +42,14 @@ when its required arm64 resource is absent or a participating ABI is
 unsupported, and it cannot be combined with the patch that removes VrApi.
 
 The initial engineering target is the arm64 Vulkan build of **The Climb 2**.
-Local launches now initialize the VrApi adapter through AXRB/OpenXR, create the
-Vulkan device, enter an OpenXR session and allocate the game's color swapchain.
-The game still fails when it requests a foveation texture, which the adapter
-does not implement. The tested emulator Vulkan driver also does not expose
-`VK_EXT_fragment_density_map`. The game's VR plugin makes this texture request
-even when its renderer's variable-rate shading is disabled. It then retries
-initialization and terminates. **The Climb 2 is not currently playable through
-this adapter.** No game frame or live-headset interaction has been verified.
+Local launches initialize the VrApi adapter through AXRB/OpenXR, create the
+Vulkan device, enter an OpenXR session and allocate the game's color and
+full-rate compatibility textures. The mandatory foveation-texture query now
+succeeds with variable-rate shading disabled. Startup reaches frame submission,
+where the adapter rejects the game's fixed-to-view projection flag (`0x4`).
+The game subsequently terminates with `SIGTRAP`. **The Climb 2 is not currently
+playable through this adapter.** No presented game frame or live-headset
+interaction has been verified.
 
 The adapter currently supports only `arm64-v8a`, Vulkan, primary-stereo
 projection layers and a limited set of projection flags and blend modes. It
@@ -63,9 +63,17 @@ and gameplay remain unverified, and no real-headset test has passed.
 For local AXRB startup diagnosis, adding `r_variable_rate_shading = 0` to
 `/storage/emulated/0/Android/data/com.crytek.climb2/files/user.cfg` gets past the
 initial device-extension check. Preserve any existing settings in that file.
-This is a diagnostic setting, **not a complete compatibility fix**: the
-mandatory foveation-texture request still fails. The patch does not modify game
-configuration automatically or advertise unsupported Vulkan extensions.
+This is **not a complete compatibility fix**: fixed-to-view projection remains
+unsupported. The patch does not modify game configuration automatically or
+advertise unsupported Vulkan extensions.
+
+The disabled-foveation path supplies a real, immutable `1x1` `RG8_UNORM`
+texture, initialized to full density on every array layer and shared across
+the swapchain's buffer indices. Initialization must complete before the image
+is returned. Hardware foveation is still reported as unsupported; this ordinary
+sampled texture is **not** a fragment-density attachment or an implementation
+of Vulkan shading-rate extensions. No foveation backend is required for this
+full-rate resource compatibility path.
 
 The current Vulkan interop path assumes the application's synchronization
 queue belongs to the first graphics-capable queue family and uses queue index

@@ -131,14 +131,12 @@ bool pollEvents() {
         event = {XR_TYPE_EVENT_DATA_BUFFER};
     }
 }
-bool ensureSession(VkQueue preferredQueue) {
+bool ensureGraphicsQueue(VkQueue preferredQueue) {
     auto& s = runtime();
-    if (s.session) return !preferredQueue || preferredQueue == s.queue;
-    if (!s.instance || !s.vk.Device) return false;
-    VkPhysicalDevice expected = VK_NULL_HANDLE;
-    if (!xrOk(s.xr.xrGetVulkanGraphicsDeviceKHR(s.instance, s.system, s.vk.Instance, &expected), "xrGetVulkanGraphicsDeviceKHR") || expected != s.vk.PhysicalDevice) {
-        OVP_ERROR("Application Vulkan device does not match the OpenXR graphics device");
-        return false;
+    if (!s.vk.Device || !s.vk.PhysicalDevice) return false;
+    if (s.queue) {
+        if (preferredQueue) s.queue = preferredQueue;
+        return true;
     }
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(s.vk.PhysicalDevice, &count, nullptr);
@@ -155,6 +153,18 @@ bool ensureSession(VkQueue preferredQueue) {
         OVP_ERROR("VrApi adapter could not obtain a graphics synchronization queue");
         return false;
     }
+    return true;
+}
+bool ensureSession(VkQueue preferredQueue) {
+    auto& s = runtime();
+    if (s.session) return !preferredQueue || preferredQueue == s.queue;
+    if (!s.instance || !s.vk.Device) return false;
+    VkPhysicalDevice expected = VK_NULL_HANDLE;
+    if (!xrOk(s.xr.xrGetVulkanGraphicsDeviceKHR(s.instance, s.system, s.vk.Instance, &expected), "xrGetVulkanGraphicsDeviceKHR") || expected != s.vk.PhysicalDevice) {
+        OVP_ERROR("Application Vulkan device does not match the OpenXR graphics device");
+        return false;
+    }
+    if (!ensureGraphicsQueue(preferredQueue)) return false;
     XrGraphicsBindingVulkanKHR binding{XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
     binding.instance = s.vk.Instance;
     binding.physicalDevice = s.vk.PhysicalDevice;

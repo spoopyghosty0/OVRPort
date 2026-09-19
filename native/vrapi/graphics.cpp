@@ -49,6 +49,8 @@ struct ovrTextureSwapChain {
     uint32_t bufferCount = 0;
     uint32_t arrayLayers = 1;
     std::array<AppImage, kMaxBuffers> appImages{};
+    AppImage fullRateImage{};
+    bool fullRateInitialized = false;
 
     XrSwapchain output = XR_NULL_HANDLE;
     uint32_t outputImageCount = 0;
@@ -112,19 +114,18 @@ bool findMemoryType(VkPhysicalDevice physicalDevice, uint32_t bits,
     return false;
 }
 
-void destroyAppImages(ovrTextureSwapChain* chain) {
+void destroyAppImage(AppImage& image) {
     const VkDevice device = ovp::runtime().vk.Device;
     if (device == VK_NULL_HANDLE) return;
-    for (uint32_t i = 0; i < chain->bufferCount; ++i) {
-        if (chain->appImages[i].image != VK_NULL_HANDLE) {
-            vkDestroyImage(device, chain->appImages[i].image, nullptr);
-            chain->appImages[i].image = VK_NULL_HANDLE;
-        }
-        if (chain->appImages[i].memory != VK_NULL_HANDLE) {
-            vkFreeMemory(device, chain->appImages[i].memory, nullptr);
-            chain->appImages[i].memory = VK_NULL_HANDLE;
-        }
-    }
+    if (image.image != VK_NULL_HANDLE) vkDestroyImage(device, image.image, nullptr);
+    if (image.memory != VK_NULL_HANDLE) vkFreeMemory(device, image.memory, nullptr);
+    image = {};
+}
+
+void destroyAppImages(ovrTextureSwapChain* chain) {
+    for (uint32_t i = 0; i < chain->bufferCount; ++i) destroyAppImage(chain->appImages[i]);
+    destroyAppImage(chain->fullRateImage);
+    chain->fullRateInitialized = false;
 }
 
 void destroyOutput(ovrTextureSwapChain* chain) {
@@ -195,7 +196,7 @@ void destroyCopyContext() {
 
 bool ensureCopyContext() {
     ovp::Runtime& s = ovp::runtime();
-    if (s.vk.Device == VK_NULL_HANDLE || s.queue == VK_NULL_HANDLE) return false;
+    if (!ovp::ensureGraphicsQueue()) return false;
     if (gCopy.device == s.vk.Device && gCopy.queue == s.queue &&
         gCopy.queueFamily == s.queueFamily && gCopy.command != VK_NULL_HANDLE) {
         return true;
@@ -226,6 +227,91 @@ bool ensureCopyContext() {
         destroyCopyContext();
         return false;
     }
+    return true;
+}
+
+bool ensureFullRateImage(ovrTextureSwapChain* chain) {
+    if (!settleCopy(kFrameWaitNs, false)) return false;
+    if (chain->fullRateInitialized) return true;
+    if (!ensureCopyContext()) return false;
+    const auto& s = ovp::runtime();
+    AppImage& resource = chain->fullRateImage;
+    if (resource.image == VK_NULL_HANDLE) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(s.vk.PhysicalDevice, VK_FORMAT_R8G8_UNORM, &properties);
+        const VkFormatFeatureFlags needed = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                            VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        if ((properties.optimalTilingFeatures & needed) != needed) return false;
+        VkImageCreateInfo image{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        image.imageType = VK_IMAGE_TYPE_2D;
+        image.format = VK_FORMAT_R8G8_UNORM;
+        image.extent = {1, 1, 1};
+        image.mipLevels = 1;
+        image.arrayLayers = chain->arrayLayers;
+        image.samples = VK_SAMPLE_COUNT_1_BIT;
+        image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(s.vk.Device, &image, nullptr, &resource.image) != VK_SUCCESS) return false;
+        VkMemoryRequirements requirements{};
+        vkGetImageMemoryRequirements(s.vk.Device, resource.image, &requirements);
+        uint32_t memoryType = 0;
+        if (!findMemoryType(s.vk.PhysicalDevice, requirements.memoryTypeBits,
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memoryType)) {
+            destroyAppImage(resource);
+            return false;
+        }
+        VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        allocate.allocationSize = requirements.size;
+        allocate.memoryTypeIndex = memoryType;
+        if (vkAllocateMemory(s.vk.Device, &allocate, nullptr, &resource.memory) != VK_SUCCESS ||
+            vkBindImageMemory(s.vk.Device, resource.image, resource.memory, 0) != VK_SUCCESS) {
+            destroyAppImage(resource);
+            return false;
+        }
+    }
+
+    if (vkResetCommandBuffer(gCopy.command, 0) != VK_SUCCESS) return false;
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(gCopy.command, &begin) != VK_SUCCESS) return false;
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = resource.image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, chain->arrayLayers};
+    vkCmdPipelineBarrier(gCopy.command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Constant (1,1) density means full-rate shading. This ordinary sampled
+    // texture supports consumers which query the resource even with VRS off;
+    // it is not a hardware fragment-density attachment or an enabled feature.
+    const VkClearColorValue fullRate{{1.0f, 1.0f, 1.0f, 1.0f}};
+    vkCmdClearColorImage(gCopy.command, resource.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        &fullRate, 1, &barrier.subresourceRange);
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(gCopy.command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    if (vkEndCommandBuffer(gCopy.command) != VK_SUCCESS ||
+        vkResetFences(gCopy.device, 1, &gCopy.fence) != VK_SUCCESS) return false;
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &gCopy.command;
+    if (vkQueueSubmit(gCopy.queue, 1, &submit, gCopy.fence) != VK_SUCCESS) return false;
+    gCopy.submitted = true;
+    gCopy.pendingCount = 0;
+    // Keep ownership if the wait times out; retirement already waits for this
+    // fence, and a later query cannot publish the image until it has completed.
+    chain->fullRateInitialized = true;
+    if (!settleCopy(kFrameWaitNs, false)) return false;
+    OVP_LOG("Created full-rate compatibility texture (%u layers); hardware foveation disabled",
+            chain->arrayLayers);
     return true;
 }
 
@@ -693,8 +779,13 @@ VRAPI ovrResult vrapi_GetTextureSwapChainBufferFoveationVulkan(
         !image || !imageWidth || !imageHeight) {
         return InvalidParameter;
     }
-    OVP_ERROR("Foveation image requested: Vulkan fragment density maps are unsupported by this adapter");
-    return Unsupported;
+    if (!ensureFullRateImage(chain)) {
+        OVP_ERROR("Failed to initialize full-rate compatibility texture");
+        return InvalidOperation;
+    }
+    *image = chain->fullRateImage.image;
+    *imageWidth = *imageHeight = 1;
+    return Success;
 }
 
 VRAPI void vrapi_DestroyTextureSwapChain(ovrTextureSwapChain* candidate) {
@@ -742,7 +833,8 @@ VRAPI ovrResult vrapi_SubmitFrame2(ovrMobile* mobile,
         if (header->Reserved ||
             (header->Flags & ~(kLayerChromatic | kLayerClipRect | kLayerInhibitSrgb)) != 0 ||
             (header->Flags & (kLayerFixedToView | kLayerSpin | kLayerExpensiveFilter)) != 0) {
-            OVP_ERROR("Unsupported projection layer flags or reserved data");
+            OVP_ERROR("Unsupported projection layer flags=0x%x reserved=%p",
+                      header->Flags, header->Reserved);
             return failFrame(Unsupported);
         }
         PreparedLayer& output = prepared[i];

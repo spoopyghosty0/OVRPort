@@ -67,6 +67,7 @@ double toSeconds(XrTime time);
 XrPosef toXrPose(const ovrPosef& pose);
 ovrPosef fromXrPose(const XrPosef& pose);
 bool validMobile(const ovrMobile* mobile);
+bool ensureGraphicsQueue(VkQueue preferredQueue = VK_NULL_HANDLE);
 bool ensureSession(VkQueue preferredQueue = VK_NULL_HANDLE);
 bool pollEvents();
 bool beginFrame(int64_t index);
