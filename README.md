@@ -45,16 +45,18 @@ The initial engineering target is the arm64 Vulkan build of **The Climb 2**.
 Local launches initialize the VrApi adapter through AXRB/OpenXR, create the
 Vulkan device, enter an OpenXR session and allocate the game's color and
 full-rate compatibility textures. The mandatory foveation-texture query now
-succeeds with variable-rate shading disabled. Startup reaches frame submission,
-where the adapter rejects the game's fixed-to-view projection flag (`0x4`).
+succeeds with variable-rate shading disabled. Startup also passes fixed-to-view
+projection flag validation (`0x4`), but the following ordinary projection uses a
+negative vertical texture scale that the current conversion does not support.
 The game subsequently terminates with `SIGTRAP`. **The Climb 2 is not currently
 playable through this adapter.** No presented game frame or live-headset
 interaction has been verified.
 
 The adapter currently supports only `arm64-v8a`, Vulkan, primary-stereo
-projection layers and a limited set of projection flags and blend modes. It
-does not support GLES, 32-bit ABIs or non-projection VrApi layers. Its tracking
-and controller paths have not been exercised in a live headset. Projection
+projection layers (including head-locked projections) and a limited set of other
+projection flags and blend modes. It does not support GLES, 32-bit ABIs or
+non-projection VrApi layers. Its tracking and controller paths have not been
+exercised in a live headset. Projection
 matrices currently use the conventional GL-depth form expected to be converted
 by the target's CryEngine Vulkan renderer; this is not a general Vulkan-depth
 or cross-engine projection implementation. Rendering, tracking, controllers
@@ -63,9 +65,9 @@ and gameplay remain unverified, and no real-headset test has passed.
 For local AXRB startup diagnosis, adding `r_variable_rate_shading = 0` to
 `/storage/emulated/0/Android/data/com.crytek.climb2/files/user.cfg` gets past the
 initial device-extension check. Preserve any existing settings in that file.
-This is **not a complete compatibility fix**: fixed-to-view projection remains
-unsupported. The patch does not modify game configuration automatically or
-advertise unsupported Vulkan extensions.
+This is **not a complete compatibility fix**: negative vertical texture scales
+remain unsupported by the projection conversion. The patch does not modify
+game configuration automatically or advertise unsupported Vulkan extensions.
 
 The disabled-foveation path supplies a real, immutable `1x1` `RG8_UNORM`
 texture, initialized to full density on every array layer and shared across
@@ -74,6 +76,15 @@ is returned. Hardware foveation is still reported as unsupported; this ordinary
 sampled texture is **not** a fragment-density attachment or an implementation
 of Vulkan shading-rate extensions. No foveation backend is required for this
 full-rate resource compatibility path.
+
+Fixed-to-view projections use OpenXR `VIEW` space and the runtime's head-relative
+per-eye poses, rather than timewarping the images from the application's render
+`HeadPose`. Ordinary projections retain their application-space behavior.
+This is generic VrApi compatibility, with no package-name checks. AXRB also
+needs matching updated guest/host components that preserve projection reference
+spaces through transport. Controlled native spatial tests exercised real Vulkan
+copies, translated/rotated head poses and canted stereo eyes; they are not a
+substitute for live-headset validation.
 
 The current Vulkan interop path assumes the application's synchronization
 queue belongs to the first graphics-capable queue family and uses queue index

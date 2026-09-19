@@ -24,10 +24,8 @@ constexpr int32_t kProjectionLayer = 1;
 constexpr uint32_t kLayerChromatic = 1u << 1;
 constexpr uint32_t kFrameFlush = 1u << 1;
 constexpr uint32_t kLayerFixedToView = 1u << 2;
-constexpr uint32_t kLayerSpin = 1u << 3;
 constexpr uint32_t kLayerClipRect = 1u << 4;
 constexpr uint32_t kLayerInhibitSrgb = 1u << 8;
-constexpr uint32_t kLayerExpensiveFilter = 1u << 19;
 constexpr int32_t kBlendZero = 0;
 constexpr int32_t kBlendOne = 1;
 constexpr int32_t kBlendSrcAlpha = 2;
@@ -831,8 +829,8 @@ VRAPI ovrResult vrapi_SubmitFrame2(ovrMobile* mobile,
             return failFrame(Unsupported);
         }
         if (header->Reserved ||
-            (header->Flags & ~(kLayerChromatic | kLayerClipRect | kLayerInhibitSrgb)) != 0 ||
-            (header->Flags & (kLayerFixedToView | kLayerSpin | kLayerExpensiveFilter)) != 0) {
+            (header->Flags & ~(kLayerChromatic | kLayerFixedToView |
+                               kLayerClipRect | kLayerInhibitSrgb)) != 0) {
             OVP_ERROR("Unsupported projection layer flags=0x%x reserved=%p",
                       header->Flags, header->Reserved);
             return failFrame(Unsupported);
@@ -905,22 +903,50 @@ VRAPI ovrResult vrapi_SubmitFrame2(ovrMobile* mobile,
     uint32_t jobCount = 0;
     std::array<const XrCompositionLayerBaseHeader*, kMaxLayers> xrLayers{};
     uint32_t xrLayerCount = 0;
+    std::array<XrView, 2> headLockedViews{{{XR_TYPE_VIEW}, {XR_TYPE_VIEW}}};
+    bool haveHeadLockedViews = false;
     for (uint32_t i = 0; i < description->LayerCount; ++i) {
         PreparedLayer& output = prepared[i];
         if (output.black) continue;
-        output.projection.space = s.appSpace;
+        const bool headLocked = (output.source->Header.Flags & kLayerFixedToView) != 0;
+        if (headLocked && !haveHeadLockedViews) {
+            XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+            locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+            locate.displayTime = s.frame.predictedDisplayTime;
+            locate.space = s.viewSpace;
+            XrViewState state{XR_TYPE_VIEW_STATE};
+            uint32_t count = 0;
+            constexpr XrViewStateFlags validPose =
+                XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT;
+            if (!ovp::xrOk(s.xr.xrLocateViews(s.session, &locate, &state, 2, &count,
+                                            headLockedViews.data()), "xrLocateViews(VIEW)") ||
+                count != 2 || (state.viewStateFlags & validPose) != validPose) {
+                return failFrame(DeviceUnavailable);
+            }
+            haveHeadLockedViews = true;
+        }
+        output.projection.space = headLocked ? s.viewSpace : s.appSpace;
         output.projection.viewCount = 2;
         output.projection.views = output.views.data();
         for (uint32_t eye = 0; eye < 2; ++eye) {
             const auto& sourceTexture = output.source->Textures[eye];
             ovrTextureSwapChain* chain = findChain(sourceTexture.ColorSwapChain);
             if (!chain || !ensureOutput(chain)) return failFrame(DeviceUnavailable);
-            if (!eyePose(output.source->HeadPose.Pose, eye, output.views[eye].pose) ||
+            // Fixed-to-view images are not timewarped using the application's
+            // render HeadPose. Keep the runtime's actual eye offsets/cant in VIEW.
+            if (headLocked) output.views[eye].pose = headLockedViews[eye].pose;
+            if ((!headLocked && !eyePose(output.source->HeadPose.Pose, eye, output.views[eye].pose)) ||
                 !projectionGeometry(sourceTexture.TexCoordsFromTanAngles,
                                     sourceTexture.TextureRect, chain->width, chain->height,
                                     output.views[eye].fov,
                                     output.views[eye].subImage.imageRect)) {
-                OVP_ERROR("Invalid pose, texture rectangle, or unsupported projection matrix");
+                const auto& matrix = sourceTexture.TexCoordsFromTanAngles;
+                const auto& rect = sourceTexture.TextureRect;
+                OVP_ERROR("Invalid projection geometry or pose: eye=%u flags=0x%x "
+                          "scale=(%g,%g) shear=(%g,%g) offset=(%g,%g) rect=(%g,%g,%g,%g)",
+                          eye, output.source->Header.Flags, matrix.M[0][0], matrix.M[1][1],
+                          matrix.M[0][1], matrix.M[1][0], matrix.M[0][2], matrix.M[1][2],
+                          rect.x, rect.y, rect.width, rect.height);
                 return failFrame(InvalidParameter);
             }
             output.views[eye].subImage.swapchain = chain->output;
