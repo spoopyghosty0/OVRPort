@@ -101,7 +101,7 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.AppImage)
+            targetFormats(TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "overport"
             packageVersion = appVersion
 

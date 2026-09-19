@@ -155,6 +155,10 @@ class PatcherContext(
 
         encoder.scanDirectory(workingDir)
         encoder.apkModule.run {
+            // Newly added libraries are absent from the original uncompressed-file metadata.
+            if (androidManifest.isExtractNativeLibs == false) {
+                setExtractNativeLibs(false)
+            }
             zipEntryMap.autoSortApkFiles()
             writeApk(outputApk)
             close()
