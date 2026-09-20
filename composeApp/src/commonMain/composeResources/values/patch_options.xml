@@ -1,0 +1,14 @@
+<resources>
+    <string name="options_patches">Patches</string>
+    <string name="options_selected">%1$d / %2$d selected</string>
+    <string name="options_recommended_active">Recommended selection · optional patches are off.</string>
+    <string name="options_custom_active">Custom selection · only checked patches will run.</string>
+    <string name="options_recommended">Reset to recommended</string>
+    <string name="options_clear">Clear</string>
+    <string name="options_search">Search patches or CLI names</string>
+    <string name="options_no_matches">No patches match your search.</string>
+    <string name="options_optional">Optional · use only when needed for your application.</string>
+    <string name="options_vrapi_experimental">Experimental ARM64 VrApi → OpenXR adapter. Compatibility is incomplete.</string>
+    <string name="options_vrapi_unavailable">Unavailable in this build. Requires an experimental OVRPort application; selecting experimental libraries alone is not enough.</string>
+    <string name="options_vrapi_conflict">VrApi removal and the OpenXR adapter are mutually exclusive. Selecting one turns the other off.</string>
+</resources>

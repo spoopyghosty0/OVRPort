@@ -1,133 +1,58 @@
 package moe.crx.overport.app
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draganddrop.DragAndDropEvent
-import androidx.compose.ui.draganddrop.DragAndDropTarget
-import androidx.compose.ui.draganddrop.awtTransferable
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.formdev.flatlaf.util.SystemFileChooser
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.launch
-import moe.crx.overport.app.composables.AppContent
 import moe.crx.overport.app.model.MainViewModel
+import moe.crx.overport.app.theme.OverportTheme
 import moe.crx.overport.utils.DesktopUtil.defaultWorkspace
 import moe.crx.overport.utils.ImageIOIconResizer
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
-import overportapp.composeapp.generated.resources.Res
-import overportapp.composeapp.generated.resources.select_a_file
-import overportapp.composeapp.generated.resources.window_icon
-import java.awt.Frame
-import java.awt.datatransfer.DataFlavor
-import java.io.*
+import overportapp.composeapp.generated.resources.*
+import java.awt.Dimension
+import java.io.File
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) = application {
+    var busy by remember { mutableStateOf(false) }
+    var closeWarning by remember { mutableStateOf(false) }
     Window(
-        onCloseRequest = ::exitApplication,
-        title = "overport",
+        onCloseRequest = { if (busy) closeWarning = true else exitApplication() },
+        title = "OVRPort",
         icon = painterResource(Res.drawable.window_icon),
+        state = rememberWindowState(width = 1180.dp, height = 860.dp),
     ) {
-        val dataDir = defaultWorkspace()
-        dataDir.mkdirs()
-
-        val selectFileString = stringResource(Res.string.select_a_file)
+        LaunchedEffect(Unit) { window.minimumSize = Dimension(900, 640) }
+        val dataDir = remember { defaultWorkspace() }
         val viewModel: MainViewModel = viewModel { MainViewModel(dataDir, ImageIOIconResizer) }
-        val openFlow = remember { MutableSharedFlow<Pair<String, InputStream>?>() }
-        val saveFlow = remember { MutableSharedFlow<OutputStream?>() }
-        var lastOpenedDirectory by remember { mutableStateOf("") }
-        val scope = rememberCoroutineScope()
-
-        fun openFile(file: File?) {
-            if (file == null || !file.isFile) {
-                scope.launch {
-                    openFlow.emit(null)
+        val selectFileTitle = stringResource(Res.string.select_a_file)
+        DesktopPatcherScreen(
+            viewModel = viewModel,
+            initialInput = args.firstOrNull().orEmpty(),
+            choosePath = { current, directory ->
+                val path = File(current).absoluteFile
+                val chooser = SystemFileChooser(selectFileTitle).apply {
+                    fileSelectionMode = if (directory) SystemFileChooser.DIRECTORIES_ONLY else SystemFileChooser.FILES_ONLY
+                    currentDirectory = if (path.isDirectory) path else path.parentFile
+                    if (!directory && path.isFile) selectedFile = path
                 }
-                return
-            }
-
-            scope.launch {
-                lastOpenedDirectory = file.parentFile.absolutePath
-                openFlow.emit(file.name to FileInputStream(file))
-            }
-        }
-
-        val dragAndDropTarget = remember {
-            object : DragAndDropTarget {
-                override fun onDrop(event: DragAndDropEvent): Boolean {
-                    val value: List<File>? = event.awtTransferable
-                        .takeIf { it.isDataFlavorSupported(DataFlavor.javaFileListFlavor) }
-                        ?.getTransferData(DataFlavor.javaFileListFlavor)
-                        ?.let { it as? List<*> }
-                        ?.filterIsInstance<File>()
-
-                    if (value?.size == 1) {
-                        scope.launch {
-                            openFile(value.first())
-                        }
-
-                        return true
-                    }
-
-                    return false
-                }
-            }
-        }
-
-        LaunchedEffect(args) {
-            if (args.isNotEmpty()) {
-                openFile(File(args.first()))
-            }
-        }
-
-        Box(
-            modifier = Modifier.fillMaxSize().dragAndDropTarget(
-                shouldStartDragAndDrop = { !viewModel.working && !viewModel.isApkLoaded() },
-                target = dragAndDropTarget
-            )
-        ) {
-            AppContent(
-                viewModel = viewModel,
-                openFile = {
-                    val fileDialog = SystemFileChooser(selectFileString).apply {
-                        currentDirectory = File(lastOpenedDirectory)
-                        selectedFile = null
-                    }
-
-                    val file = if (fileDialog.showOpenDialog(Frame()) != SystemFileChooser.APPROVE_OPTION) null else {
-                        fileDialog.selectedFile
-                    }
-
-                    openFile(file)
-                },
-                saveFile = { name ->
-                    val fileDialog = SystemFileChooser(selectFileString).apply {
-                        currentDirectory = File(lastOpenedDirectory)
-                        selectedFile = File(lastOpenedDirectory, name)
-                    }
-
-                    val file = if (fileDialog.showSaveDialog(Frame()) != SystemFileChooser.APPROVE_OPTION) null else {
-                        fileDialog.selectedFile
-                    }
-
-                    scope.launch {
-                        if (file == null) {
-                            saveFlow.emit(null)
-                        } else {
-                            saveFlow.emit(FileOutputStream(file))
-                        }
-                    }
-                },
-                openFlow = openFlow,
-                saveFlow = saveFlow,
+                if (chooser.showOpenDialog(window) == SystemFileChooser.APPROVE_OPTION) chooser.selectedFile else null
+            },
+            onBusyChange = { busy = it },
+        )
+        if (closeWarning) OverportTheme(darkTheme = true) {
+            AlertDialog(
+                onDismissRequest = { closeWarning = false },
+                title = { Text("OVRPort") },
+                text = { Text(stringResource(Res.string.desktop_close_busy)) },
+                confirmButton = { TextButton(onClick = { closeWarning = false }) { Text(stringResource(Res.string.versions_close)) } },
             )
         }
     }

@@ -84,9 +84,9 @@ fun PatcherScreen(
     }
 
     if (inputFile != null && !inProgress) {
-        VersionManagerSheet(
-            viewModel,
-            onCancel = {
+        VersionManagerDialog(
+            manager = viewModel.versionManager,
+            onDismiss = {
                 inputFile?.second?.close()
                 inputFile = null
             },

@@ -13,6 +13,7 @@ import moe.crx.overport.patches.IconResizer
 import moe.crx.overport.patches.PLATFORM_ICON_RESIZER
 import moe.crx.overport.patching.PatcherContext
 import moe.crx.overport.utils.HttpUtil.download
+import moe.crx.overport.utils.NameFormatter
 import moe.crx.overport.versions.VersionManager
 import org.jetbrains.compose.resources.getString
 import overportapp.composeapp.generated.resources.*
@@ -24,7 +25,7 @@ import java.io.OutputStream
 class MainViewModel(val dataDirectory: File, platformIconResizer: IconResizer) : ViewModel() {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
-        const val RELEASES_URL = "https://api.github.com/repos/ovrport/app/releases"
+        const val RELEASES_URL = "https://api.github.com/repos/webhead2oo9/OVRPort/releases"
     }
 
     init {
@@ -43,23 +44,32 @@ class MainViewModel(val dataDirectory: File, platformIconResizer: IconResizer) :
 
     private suspend fun usePatcher(block: suspend PatcherContext.() -> Unit) {
         working = true
-        withContext(Dispatchers.IO) {
-            patcherState?.block()
+        try {
+            withContext(Dispatchers.IO) {
+                patcherState?.block()
+            }
+        } finally {
+            working = false
+            currentProgress = null
         }
-        working = false
-        currentProgress = null
     }
 
-    suspend fun checkout(overportVersion: String, fileName: String) {
+    suspend fun checkout(
+        overportVersion: String,
+        fileName: String,
+        workspace: File = dataDirectory,
+        nameFormat: String = NameFormatter.DEFAULT_FORMAT,
+    ) {
         patcherState = PatcherContext(
             overportVersion,
-            dataDirectory,
+            workspace,
             fileName,
-            ""
+            nameFormat,
         )
         usePatcher {
             currentProgress = getString(Res.string.progress_preparing)
             currentProgressFloat = 0.0f
+            patcherDirectory.mkdirs()
             checkout()
         }
     }
@@ -78,9 +88,13 @@ class MainViewModel(val dataDirectory: File, platformIconResizer: IconResizer) :
 
     suspend fun process(patches: Map<String, List<String>>) {
         usePatcher {
-            currentProgress = getString(Res.string.progress_patching)
+            val progressText = getString(Res.string.progress_patching)
+            currentProgress = progressText
             currentProgressFloat = 0.50f
-            patch(patches)
+            patch(patches) { index, patch ->
+                currentProgress = "$progressText ${patch.name}"
+                currentProgressFloat = 0.50f + 0.25f * index / patches.size.coerceAtLeast(1)
+            }
         }
     }
 
@@ -93,13 +107,16 @@ class MainViewModel(val dataDirectory: File, platformIconResizer: IconResizer) :
     }
 
     suspend fun cancel() {
-        usePatcher {
-            currentProgress = getString(Res.string.progress_cleaning)
-            currentProgressFloat = 1.0f
-            cleanup()
+        try {
+            usePatcher {
+                currentProgress = getString(Res.string.progress_cleaning)
+                currentProgressFloat = 1.0f
+                cleanup()
+            }
+        } finally {
+            currentProgressFloat = null
+            patcherState = null
         }
-        currentProgressFloat = null
-        patcherState = null
     }
 
     fun currentAppName(): String? {
@@ -130,7 +147,8 @@ class MainViewModel(val dataDirectory: File, platformIconResizer: IconResizer) :
         return runCatching {
             json
                 .decodeFromString<List<GithubRelease>>(String(download(RELEASES_URL)))
-                .reduceOrNull { left, right -> if (left.publishedAt > right.publishedAt) left else right }
+                .filter { it.isNewerThan(VersionManager.VERSION) }
+                .maxByOrNull { it.publishedAt }
         }.getOrNull()
     }
 }

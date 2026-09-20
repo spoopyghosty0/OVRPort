@@ -8,15 +8,10 @@
     <string name="progress_compiling">Compiling APK…</string>
     <string name="progress_cleaning">Cleaning up…</string>
     <string name="patcher_nav_item">Patcher</string>
-    <string name="select_version_title">Select version</string>
-    <string name="you_have_no_versions">You have no versions installed and overport release index is not available. Check your internet connection.</string>
     <string name="tag_experimental">experimental</string>
-    <string name="tag_latest">latest</string>
     <string name="tag_custom">custom</string>
     <string name="status_installed">Installed</string>
-    <string name="status_installed_incompatible">Installed but incompatible</string>
     <string name="status_not_installed">Not installed</string>
-    <string name="status_not_installed_incompatible">Incompatible with app version</string>
     <string name="action_confirm">Confirm</string>
     <string name="action_cancel">Cancel</string>
     <string name="select_apk_to_begin">Select an APK to begin</string>
@@ -35,7 +30,6 @@
     <string name="status_has_problems">Has problems</string>
     <string name="status_not_working">Not working</string>
     <string name="status_loading">Loading…</string>
-    <string name="use_at_your_risk">Not recommended, use at your own risk</string>
     <string name="patch_copy_libraries">Copy overport libraries</string>
     <string name="patch_copy_ovrplugin_vrapi">Copy OVRPlugin if VrApi is present</string>
     <string name="patch_fix_min_android_sdk">Fix minimal Android SDK</string>

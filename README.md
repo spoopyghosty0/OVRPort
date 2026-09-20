@@ -139,6 +139,37 @@ After the configured workflow has run, use this repository's GitHub
 branch and pull-request artifacts. Check the channel in both the artifact
 filename and release title before downloading.
 
+## Desktop patching workspace
+
+The desktop app exposes the CLI's patching options before an APK is loaded:
+
+- Drop an APK onto the window, browse for it, or enter its path.
+- Choose the output directory and filename template. A blank directory saves
+  beside the input; a blank template uses `{filename}.output.{ext}`. Expand
+  **Filename tags and examples** for all supported metadata tags.
+- Choose `latest`, `experimental`, or an exact patching-library version and a
+  workspace directory. **Manage** lists versions and supports explicit
+  installation, selection, and confirmed removal without loading an APK.
+- Search patches by their readable labels or exact CLI names. **Reset to
+  recommended** restores the default selection; **Clear** starts a custom
+  selection. Only checked patches run, in registry order. Icon replacement
+  offers game-icon and cover-art choices.
+- Select **Patch APK** to prepare, patch, sign, and export. Progress, errors,
+  and the output location remain visible. The original APK cannot be
+  overwritten; replacing an existing output requires confirmation.
+
+Optional patches remain off by default. VrApi removal and VrApi/OpenXR
+replacement are mutually exclusive. The OpenXR replacement is visible but
+unavailable in stable builds; selecting `experimental` libraries does not add
+the native adapter to a stable application.
+
+Library versions are read from the upstream
+`https://ovrp.crx.moe/api/v1/releases/index` feed; `latest` can resolve to an
+experimental compatible library release. Application updates are checked
+separately against this fork's
+[`webhead2oo9/OVRPort` releases](https://github.com/webhead2oo9/OVRPort/releases),
+using numeric release-tag versions rather than display names.
+
 ## Building from source
 
 ### Requirements

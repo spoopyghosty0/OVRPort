@@ -1,0 +1,16 @@
+<resources>
+    <string name="versions_title">Manage upstream patching libraries</string>
+    <string name="versions_scope">Source: ovrp.crx.moe/api/v1/releases/index. These are upstream base libraries, not releases of our fork. Our native compatibility fixes are bundled with this application. Installation and removal affect only this workspace.</string>
+    <string name="versions_requested">Version or channel</string>
+    <string name="versions_use">Use</string>
+    <string name="versions_install">Install</string>
+    <string name="versions_remove">Remove</string>
+    <string name="versions_refresh">Refresh</string>
+    <string name="versions_close">Close</string>
+    <string name="versions_install_failed">Could not install this version. Check the version, connection, and application compatibility.</string>
+    <string name="versions_installed">Version %1$s is installed and ready to use.</string>
+    <string name="versions_offline">No remote releases returned. Check your connection or use a version already installed in this workspace.</string>
+    <string name="versions_incompatible">Requires a newer OVRPort application.</string>
+    <string name="versions_remove_title">Remove %1$s?</string>
+    <string name="versions_remove_message">This deletes the installed patching libraries from this workspace. Existing patched APKs are not affected.</string>
+</resources>

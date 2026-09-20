@@ -1,0 +1,36 @@
+<resources>
+    <string name="desktop_heading">APK patching workspace</string>
+    <string name="desktop_input_title">1. Source APK</string>
+    <string name="desktop_input_hint">Drop an APK anywhere, browse, or enter its path. Configure everything before patching.</string>
+    <string name="desktop_input">Input APK</string>
+    <string name="desktop_invalid_input">Choose an existing .apk file.</string>
+    <string name="desktop_output_title">2. Output</string>
+    <string name="desktop_output_hint">The original APK is kept. Existing output files require confirmation before replacement.</string>
+    <string name="desktop_output_directory">Output directory</string>
+    <string name="desktop_output_default">Leave blank to save beside the input APK.</string>
+    <string name="desktop_filename">Filename template</string>
+    <string name="desktop_filename_help">Filename tags and examples</string>
+    <string name="desktop_filename_tags">{filename} — input name without extension\n{ext} — input extension\n{filenameext} — complete input name\n{package} — application package\n{label} — application label\n{code} — application version code\n{version} — application version name\n{overport} — patching library version\n\nExample: {package}-{version}.patched.apk\nBlank uses {filename}.output.{ext}. Metadata tags resolve when the APK is patched.</string>
+    <string name="desktop_runtime_title">3. Upstream patching libraries</string>
+    <string name="desktop_runtime_hint">Base libraries come from upstream OVRPort. Our fork's native compatibility fixes are bundled with this application.</string>
+    <string name="desktop_version_hint">Use latest, experimental, or an exact version. Latest includes compatible experimental releases. Missing libraries are downloaded when patching.</string>
+    <string name="desktop_manage">Manage</string>
+    <string name="desktop_workspace">Workspace directory</string>
+    <string name="desktop_workspace_reset">Use default workspace</string>
+    <string name="desktop_browse">Browse: %1$s</string>
+    <string name="desktop_ready">Ready when you are. Select an APK to patch.</string>
+    <string name="desktop_ready_to_patch">Ready to patch · %1$d patches selected.</string>
+    <string name="desktop_working">Patching APK…</string>
+    <string name="desktop_patch">Patch APK</string>
+    <string name="desktop_failed">Patching failed</string>
+    <string name="desktop_details">Details</string>
+    <string name="desktop_reveal">Open output folder</string>
+    <string name="desktop_invalid_name">The filename template must produce a filename, not a directory path.</string>
+    <string name="desktop_invalid_output">Cannot create the output directory.</string>
+    <string name="desktop_original_protected">Output would overwrite the original APK. Choose a different filename or directory.</string>
+    <string name="desktop_internal_path">Input and output must be outside the workspace's internal dec directory.</string>
+    <string name="desktop_overwrite_title">Replace existing output?</string>
+    <string name="desktop_overwrite_message">%1$s\n\nThis output file already exists. Replace it with the newly patched APK?</string>
+    <string name="desktop_replace">Replace</string>
+    <string name="desktop_close_busy">An operation is running. Wait for it to finish before closing the application.</string>
+</resources>

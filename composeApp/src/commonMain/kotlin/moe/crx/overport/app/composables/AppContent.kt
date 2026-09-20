@@ -18,7 +18,6 @@ import kotlinx.coroutines.withContext
 import moe.crx.overport.app.model.GithubRelease
 import moe.crx.overport.app.model.MainViewModel
 import moe.crx.overport.app.theme.OverportTheme
-import moe.crx.overport.versions.VersionManager
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import overportapp.composeapp.generated.resources.Res
@@ -68,9 +67,7 @@ fun AppContent(
                         }
                     },
                     actions = {
-                        val isUpdateAvailable =
-                            versionToUpdate?.name != null && versionToUpdate?.name != VersionManager.VERSION
-                        FadeVisibility(isUpdateAvailable) {
+                        FadeVisibility(versionToUpdate != null) {
                             FilledTonalButton(
                                 modifier = Modifier.padding(8.dp, 0.dp),
                                 onClick = { versionToUpdate?.htmlUrl?.let { urlHandler.openUri(it) } }
