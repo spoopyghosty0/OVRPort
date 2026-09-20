@@ -94,6 +94,7 @@ static void shutdown() {
     s.locatedFovValid = false;
     s.recommendedFovDegrees = {};
     s.locatedFovDegrees = {};
+    s.recenterCount = 0;
     s.loggedDisplayRefreshRateSource = DisplayRefreshRateSource::Unqueried;
     s.loggedDisplayRefreshRate = 0;
     if (s.activity && s.vm) {

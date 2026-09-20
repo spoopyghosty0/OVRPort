@@ -93,7 +93,9 @@ full-rate resource compatibility path.
 
 Initial eye-level tracking waits for a valid tracked head pose in a visible
 session, establishes a yaw/position origin, and reports that change through the
-recenter counter. Heading extraction accounts for headset pitch. Legacy Touch
+recenter counter. This counter survives VR-session and Vulkan-system teardown
+but resets on full `vrapi_Shutdown()`. Heading extraction accounts for headset
+pitch. Legacy Touch
 controller poses use the inverse of Meta's native-to-grip rigid transform rather
 than returning raw OpenXR grip poses. The adapter reports the concrete Quest
 compatibility identity (`259`), not a hardware-detected headset model.
