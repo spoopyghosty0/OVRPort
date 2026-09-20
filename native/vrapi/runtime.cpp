@@ -8,6 +8,8 @@
 #include <thread>
 
 namespace ovp {
+static constexpr char SystemDisplayRefreshRateExtension[] =
+    "XR_AXRB_system_display_refresh_rate";
 Runtime& runtime() { static Runtime state; return state; }
 bool xrOk(XrResult result, const char* operation) {
     if (XR_SUCCEEDED(result)) return true;
@@ -83,11 +85,17 @@ static void shutdown() {
     s.instance = XR_NULL_HANDLE;
     s.system = XR_NULL_SYSTEM_ID;
     s.viewConfigurationFovExtension = false;
+    s.colorSpaceExtension = false;
+    s.performanceExtension = false;
+    s.threadExtension = false;
+    s.systemDisplayRefreshRateExtension = false;
+    s.displayRefreshRateExtension = false;
     s.recommendedFovValid = false;
     s.locatedFovValid = false;
     s.recommendedFovDegrees = {};
     s.locatedFovDegrees = {};
-    s.recenterCount = 0;
+    s.loggedDisplayRefreshRateSource = DisplayRefreshRateSource::Unqueried;
+    s.loggedDisplayRefreshRate = 0;
     if (s.activity && s.vm) {
         JNIEnv* env = nullptr;
         bool attached = false;
@@ -104,6 +112,8 @@ static void shutdown() {
     s.setColorSpace = nullptr;
     s.setPerformance = nullptr;
     s.setThread = nullptr;
+    s.getSystemDisplayRefreshRate = nullptr;
+    s.getDisplayRefreshRate = nullptr;
     if (s.loader) dlclose(s.loader);
     s.loader = nullptr;
     s.xr = {};
@@ -348,6 +358,48 @@ static bool symmetricFovDegrees(const XrFovf& first, const XrFovf& second,
                2.0f * verticalHalf * degreesPerRadian};
     return true;
 }
+static const char* displayRefreshRateSourceName(DisplayRefreshRateSource source) {
+    switch (source) {
+        case DisplayRefreshRateSource::AxrbSystem: return "XR_AXRB_system";
+        case DisplayRefreshRateSource::FbSession: return "XR_FB_session";
+        case DisplayRefreshRateSource::FramePeriod: return "frame_period";
+        default: return "unavailable";
+    }
+}
+static float queryDisplayRefreshRate() {
+    auto& s = runtime();
+    float rate = 0;
+    DisplayRefreshRateSource source = DisplayRefreshRateSource::Unavailable;
+    if (s.systemDisplayRefreshRateExtension) {
+        source = DisplayRefreshRateSource::AxrbSystem;
+        float queried = 0;
+        if (s.getSystemDisplayRefreshRate && s.instance && s.system != XR_NULL_SYSTEM_ID &&
+            XR_SUCCEEDED(s.getSystemDisplayRefreshRate(s.instance, s.system, &queried)) &&
+            std::isfinite(queried) && queried > 0) {
+            rate = queried;
+        }
+    } else if (s.displayRefreshRateExtension) {
+        source = DisplayRefreshRateSource::FbSession;
+        float queried = 0;
+        if (s.getDisplayRefreshRate && s.session &&
+            XR_SUCCEEDED(s.getDisplayRefreshRate(s.session, &queried)) &&
+            std::isfinite(queried) && queried > 0) {
+            rate = queried;
+        }
+    } else if (s.frame.predictedDisplayPeriod > 0) {
+        source = DisplayRefreshRateSource::FramePeriod;
+        rate = float(1e9 / double(s.frame.predictedDisplayPeriod));
+    }
+    if (s.loggedDisplayRefreshRateSource == DisplayRefreshRateSource::Unqueried ||
+        s.loggedDisplayRefreshRateSource != source ||
+        std::abs(s.loggedDisplayRefreshRate - rate) >= 0.001f) {
+        OVP_LOG("Display refresh rate=%.3f Hz source=%s",
+                rate, displayRefreshRateSourceName(source));
+        s.loggedDisplayRefreshRateSource = source;
+        s.loggedDisplayRefreshRate = rate;
+    }
+    return rate;
+}
 }
 using namespace ovp;
 #define LOCK_STATE auto& s = runtime(); std::lock_guard<std::recursive_mutex> lock(s.mutex)
@@ -388,6 +440,10 @@ VRAPI int vrapi_Initialize(const ovrInitParms* parms) {
     }
     s.viewConfigurationFovExtension = has(XR_EPIC_VIEW_CONFIGURATION_FOV_EXTENSION_NAME);
     if (s.viewConfigurationFovExtension) extensions.push_back(XR_EPIC_VIEW_CONFIGURATION_FOV_EXTENSION_NAME);
+    s.systemDisplayRefreshRateExtension = has(SystemDisplayRefreshRateExtension);
+    if (s.systemDisplayRefreshRateExtension) extensions.push_back(SystemDisplayRefreshRateExtension);
+    s.displayRefreshRateExtension = has(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    if (s.displayRefreshRateExtension) extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     for (const char* optional : {XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME, XR_FB_COLOR_SPACE_EXTENSION_NAME, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME}) if (has(optional)) extensions.push_back(optional);
     XrInstanceCreateInfoAndroidKHR android{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     android.applicationVM = s.vm;
@@ -423,6 +479,8 @@ VRAPI int vrapi_Initialize(const ovrInitParms* parms) {
     if (s.colorSpaceExtension) load("xrSetColorSpaceFB", reinterpret_cast<PFN_xrVoidFunction*>(&s.setColorSpace));
     if (s.performanceExtension) load("xrPerfSettingsSetPerformanceLevelEXT", reinterpret_cast<PFN_xrVoidFunction*>(&s.setPerformance));
     if (s.threadExtension) load("xrSetAndroidApplicationThreadKHR", reinterpret_cast<PFN_xrVoidFunction*>(&s.setThread));
+    if (s.systemDisplayRefreshRateExtension) load("xrGetSystemDisplayRefreshRateAXRB", reinterpret_cast<PFN_xrVoidFunction*>(&s.getSystemDisplayRefreshRate));
+    if (s.displayRefreshRateExtension) load("xrGetDisplayRefreshRateFB", reinterpret_cast<PFN_xrVoidFunction*>(&s.getDisplayRefreshRate));
     OVP_LOG("Initialized Vulkan/OpenXR adapter, stereo=%ux%u", s.viewConfig[0].recommendedImageRectWidth, s.viewConfig[0].recommendedImageRectHeight);
     return 0;
 }
@@ -553,7 +611,7 @@ VRAPI int vrapi_GetSystemPropertyInt(const ovrJava*, int property) {
 }
 VRAPI float vrapi_GetSystemPropertyFloat(const ovrJava*, int property) {
     LOCK_STATE;
-    if (property == 4) return s.frame.predictedDisplayPeriod > 0 ? float(1e9 / double(s.frame.predictedDisplayPeriod)) : 0;
+    if (property == 4) return queryDisplayRefreshRate();
     if (property == 7 || property == 8) {
         const size_t axis = static_cast<size_t>(property - 7);
         // Live optical FOV supersedes a provisional startup recommendation.

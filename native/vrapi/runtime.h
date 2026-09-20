@@ -30,6 +30,15 @@ struct XrApi {
     OVP_XR_FUNCTIONS(OVP_FIELD)
 #undef OVP_FIELD
 };
+typedef XrResult (XRAPI_PTR *PFN_axrbGetSystemDisplayRefreshRate)(
+    XrInstance instance, XrSystemId systemId, float* displayRefreshRate);
+enum class DisplayRefreshRateSource : uint8_t {
+    Unqueried,
+    Unavailable,
+    AxrbSystem,
+    FbSession,
+    FramePeriod,
+};
 struct Runtime {
     std::recursive_mutex mutex;
     XrApi xr;
@@ -58,9 +67,14 @@ struct Runtime {
     bool timeMapped = false, recommendedFovValid = false, locatedFovValid = false;
     bool viewConfigurationFovExtension = false;
     bool colorSpaceExtension = false, performanceExtension = false, threadExtension = false;
+    bool systemDisplayRefreshRateExtension = false, displayRefreshRateExtension = false;
     PFN_xrSetColorSpaceFB setColorSpace = nullptr;
     PFN_xrPerfSettingsSetPerformanceLevelEXT setPerformance = nullptr;
     PFN_xrSetAndroidApplicationThreadKHR setThread = nullptr;
+    PFN_axrbGetSystemDisplayRefreshRate getSystemDisplayRefreshRate = nullptr;
+    PFN_xrGetDisplayRefreshRateFB getDisplayRefreshRate = nullptr;
+    DisplayRefreshRateSource loggedDisplayRefreshRateSource = DisplayRefreshRateSource::Unqueried;
+    float loggedDisplayRefreshRate = 0;
     ovrPosef trackingTransform{{0, 0, 0, 1}, {0, 0, 0}};
     ovrPosef centerEyeTransform{{0, 0, 0, 1}, {0, 0, 0}};
     bool initialRecenterPending = false;

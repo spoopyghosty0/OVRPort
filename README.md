@@ -67,6 +67,15 @@ non-projection VrApi layers. Projection matrices use the conventional GL-depth
 form expected to be converted by the target's CryEngine Vulkan renderer;
 this is not a general Vulkan-depth or cross-engine projection implementation.
 
+Display-refresh queries use the runtime's reported display rate rather than
+assuming a Quest-specific rate. With AXRB's optional
+`XR_AXRB_system_display_refresh_rate` extension, the value is available before
+Vulkan registration, session creation, or the first frame. Other runtimes use
+`XR_FB_display_refresh_rate` once a session exists; frame-period estimation is
+used only when neither direct-rate extension is available. An unavailable
+direct rate returns zero, not a fabricated fallback. These queries do not
+request a headset refresh-mode change or override a game's own frame limiter.
+
 For local AXRB startup diagnosis, adding `r_variable_rate_shading = 0` to
 `/storage/emulated/0/Android/data/com.crytek.climb2/files/user.cfg` gets past the
 initial device-extension check. Preserve any existing settings in that file.
