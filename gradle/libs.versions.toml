@@ -1,40 +1,11 @@
 [versions]
-agp = "8.12.3"
-android-compileSdk = "36"
-android-minSdk = "29"
-android-targetSdk = "36"
-androidx-activityCompose = "1.12.1"
-androidx-lifecycle = "2.9.6"
-compose-multiplatform = "1.9.3"
-kotlin = "2.2.21"
 kotlinx-coroutines = "1.10.2"
 apksig = "8.12.3"
 bcpkix = "1.83"
 kotlinx-serialization = "1.9.0"
-lifecycle-viewmodel-compose = "2.9.6"
-compose-hot-reload = "1.0.0"
-flatlaf = "3.7.2"
 
 [libraries]
-com-formdev-flatlaf = { group = "com.formdev", name = "flatlaf", version.ref = "flatlaf" }
-
-androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "androidx-activityCompose" }
-
-androidx-lifecycle-viewmodel = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "androidx-lifecycle" }
-androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
-kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
-androidx-lifecycle-viewmodel-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle-viewmodel-compose" }
-
 android-tools-build = { group = "com.android.tools.build", name = "apksig", version.ref = "apksig" }
 bouncycastle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bcpkix" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
-
-[plugins]
-androidApplication = { id = "com.android.application", version.ref = "agp" }
-androidLibrary = { id = "com.android.library", version.ref = "agp" }
-composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
-composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
-kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-composeHotReload = { id = "org.jetbrains.compose.hot-reload", version.ref = "compose-hot-reload" }

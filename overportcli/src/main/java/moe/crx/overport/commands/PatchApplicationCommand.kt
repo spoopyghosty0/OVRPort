@@ -22,7 +22,8 @@ object PatchApplicationCommand : CliCommand() {
 
     override fun printHelp(): Boolean {
         println("usage: overport patch --input=<path> [--output=<path>]")
-        println("    [--output-name=<format>] [--workspace=<path>] [--patches=<names>] [--version=<value>]")
+        println("    [--output-name=<format>] [--workspace=<path>] [--patches=<value>]")
+        println("    [--extra-patches=<value>] [--version=<value>]")
         println()
         println("--input=<path>")
         println("Specifies input APK file to patch.")
@@ -46,6 +47,11 @@ object PatchApplicationCommand : CliCommand() {
         println("If not specified, uses every recommended patch available. Use \"overport patches\" to see available patches.")
         println("You can also specify arguments for a specific patch using <patch name>=<comma-separated arguments>.")
         println()
+        println("--extra-patches=<value>")
+        println("Adds patches after the defaults or an explicit --patches selection.")
+        println("Uses the same semicolon-separated patch and comma-separated argument syntax as --patches.")
+        println("A patch cannot be named in both --patches and --extra-patches.")
+        println()
         println("--version=<value>")
         println("Specifies which overport version to use for patching.")
         println("Value also could be \"experimental\" or \"latest\".")
@@ -66,33 +72,66 @@ object PatchApplicationCommand : CliCommand() {
         return true
     }
 
-    private data class ParsedArguments(
+    internal data class ParsedArguments(
         var inputFile: String? = null,
         var outputFile: String? = null,
         var workspace: String? = null,
         var patches: Map<String, List<String>>? = null,
+        var extraPatches: Map<String, List<String>> = emptyMap(),
         var nameFormat: String? = null,
         var overportVersion: String? = null,
     )
 
-    private fun scanArguments(args: List<String>): ParsedArguments {
-        val parsed = ParsedArguments()
-
-        val associated = args.associate {
-            it.substringBefore('=') to it.substringAfter('=', "")
+    internal fun parsePatchList(value: String): Map<String, List<String>> {
+        require(value.isNotBlank()) { "Patch list cannot be empty." }
+        val parsed = linkedMapOf<String, List<String>>()
+        value.split(';').forEach { entry ->
+            val trimmed = entry.trim()
+            val name = trimmed.substringBefore('=').trim()
+            require(name.isNotEmpty()) { "Patch name cannot be empty." }
+            require(name !in parsed) { "Patch specified more than once: $name" }
+            val arguments = if ('=' in trimmed) {
+                trimmed.substringAfter('=').split(',').map(String::trim)
+            } else {
+                emptyList()
+            }
+            parsed[name] = arguments
         }
+        return parsed
+    }
 
-        associated.forEach { (key, value) ->
+    internal fun mergePatchSelections(
+        patches: Map<String, List<String>>?,
+        extraPatches: Map<String, List<String>>,
+    ): Map<String, List<String>> {
+        val base = patches ?: PatchStore.recommended().associateTo(linkedMapOf()) { it.name to emptyList() }
+        val duplicate = base.keys.firstOrNull(extraPatches::containsKey)
+        require(duplicate == null) { "Patch specified in both --patches and --extra-patches: $duplicate" }
+        return linkedMapOf<String, List<String>>().apply {
+            putAll(base)
+            putAll(extraPatches)
+            PatchStore.select(keys)
+        }
+    }
+
+    internal fun scanArguments(args: List<String>): ParsedArguments {
+        val parsed = ParsedArguments()
+        val seen = mutableSetOf<String>()
+
+        args.forEach { argument ->
+            val key = argument.substringBefore('=')
+            require(argument.startsWith("--") && '=' in argument) { "Invalid argument: $argument" }
+            require(seen.add(key)) { "Argument specified more than once: $key" }
+            val value = argument.substringAfter('=')
             when (key) {
                 "--input" -> parsed.inputFile = value
                 "--output" -> parsed.outputFile = value
                 "--workspace" -> parsed.workspace = value
-                "--patches" -> parsed.patches = value.split(';').map { splitted -> splitted.trim() }.associate {
-                    it.substringBefore('=') to it.substringAfter('=', "").split(',').map { splitted -> splitted.trim() }
-                }
-
+                "--patches" -> parsed.patches = parsePatchList(value)
+                "--extra-patches" -> parsed.extraPatches = parsePatchList(value)
                 "--output-name" -> parsed.nameFormat = value
                 "--version" -> parsed.overportVersion = value
+                else -> throw IllegalArgumentException("Unknown argument: $key")
             }
         }
 
@@ -101,12 +140,11 @@ object PatchApplicationCommand : CliCommand() {
 
     override suspend fun execute(args: List<String>): Boolean {
         val parsed = scanArguments(args)
+        val patches = mergePatchSelections(parsed.patches, parsed.extraPatches)
 
         val inputFile = parsed.inputFile?.let { File(it) } ?: return false
 
-        if (!inputFile.isFile) {
-            return false
-        }
+        require(inputFile.isFile) { "Input APK is not a file: ${inputFile.path}" }
 
         var outputDir = parsed.outputFile?.let { File(it) } ?: inputFile.parentFile
 
@@ -116,7 +154,6 @@ object PatchApplicationCommand : CliCommand() {
 
         val workspace = parsed.workspace?.let { File(it) } ?: defaultWorkspace()
 
-        val patches = parsed.patches ?: PatchStore.recommended().associate { it.name to listOf() }
 
         val nameFormat = parsed.nameFormat ?: DEFAULT_FORMAT
 

@@ -32,5 +32,4 @@ dependencyResolutionManagement {
     }
 }
 
-include(":composeApp")
 include(":overportcli")

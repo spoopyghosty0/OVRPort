@@ -18,7 +18,6 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 *.dm
 *.apk
-composeApp/release/output-metadata.json
 *.salive
 workspace
 ignore

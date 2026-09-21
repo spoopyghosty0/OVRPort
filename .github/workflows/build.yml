@@ -109,14 +109,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-
       - name: Install platform compatibility toolchain
         run: sdkmanager 'ndk;27.3.13750724'
+
       - name: Grant execute permission for Gradle
         run: chmod +x gradlew
 
-      - name: Run test suites
-        run: ./gradlew :overportcli:test :composeApp:desktopTest -PappVersion=${{ needs.metadata.outputs.version }}
+      - name: Run test suite
+        run: ./gradlew :overportcli:test -PappVersion=${{ needs.metadata.outputs.version }}
 
   vrapi-payload:
     name: Build experimental VrApi adapter
@@ -150,7 +150,7 @@ jobs:
             --ndk "$ANDROID_SDK_ROOT/ndk/27.3.13750724" \
             --output "$RUNNER_TEMP/vrapi-resource"
 
-      - name: Upload adapter for packaging jobs
+      - name: Upload adapter for packaging job
         if: needs.metadata.outputs.experimental == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -159,8 +159,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  portable:
-    name: Android and CLI packages
+  cli:
+    name: CLI package
     needs: [metadata, test, vrapi-payload]
     runs-on: ubuntu-latest
     steps:
@@ -190,16 +190,16 @@ jobs:
           name: internal-vrapi-${{ needs.metadata.outputs.artifact_suffix }}
           path: ${{ runner.temp }}/vrapi-resource
 
-      - name: Build stable packages
+      - name: Build stable CLI
         if: needs.metadata.outputs.experimental != 'true'
         run: >-
-          ./gradlew :overportcli:shadowJar :composeApp:assembleRelease
+          ./gradlew :overportcli:shadowJar
           -PappVersion=${{ needs.metadata.outputs.version }}
 
-      - name: Build experimental packages
+      - name: Build experimental CLI
         if: needs.metadata.outputs.experimental == 'true'
         run: >-
-          ./gradlew :overportcli:shadowJar :composeApp:assembleRelease
+          ./gradlew :overportcli:shadowJar
           -PappVersion=${{ needs.metadata.outputs.version }}
           -PwithVrApi=true
           -PvrApiResourceRoot="$RUNNER_TEMP/vrapi-resource"
@@ -214,30 +214,27 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile
 
-          artifacts = [
-              *Path("composeApp/build/outputs/apk/release").glob("*.apk"),
-              *Path("overportcli/build/libs").glob("*-all.jar"),
-          ]
-          if len(artifacts) != 2:
-              raise SystemExit(f"Expected an APK and CLI JAR, found {len(artifacts)} artifacts")
+          artifacts = list(Path("overportcli/build/libs").glob("*-all.jar"))
+          if len(artifacts) != 1:
+              raise SystemExit(f"Expected one CLI JAR, found {len(artifacts)} artifacts")
+          artifact = artifacts[0]
           resources = (
               "vrapi/arm64-v8a/libvrapi.bin",
               "vrapi/licenses/OPENXR-SDK.txt",
               "vrapi/licenses/ANDROID-NDK.txt",
           )
-          for artifact in artifacts:
-              with ZipFile(artifact) as archive:
-                  if os.environ["EXPERIMENTAL"] == "true":
-                      root = Path(os.environ["RUNNER_TEMP"]) / "vrapi-resource"
-                      for resource in resources:
-                          if archive.read(resource) != (root / resource).read_bytes():
-                              raise SystemExit(f"{artifact}: mismatched {resource}")
-                  elif any(name.startswith("vrapi/") for name in archive.namelist()):
-                      raise SystemExit(f"{artifact}: experimental resources leaked into stable")
-              print(f"Verified channel resources: {artifact}")
+          with ZipFile(artifact) as archive:
+              if os.environ["EXPERIMENTAL"] == "true":
+                  root = Path(os.environ["RUNNER_TEMP"]) / "vrapi-resource"
+                  for resource in resources:
+                      if archive.read(resource) != (root / resource).read_bytes():
+                          raise SystemExit(f"{artifact}: mismatched {resource}")
+              elif any(name.startswith("vrapi/") for name in archive.namelist()):
+                  raise SystemExit(f"{artifact}: experimental resources leaked into stable")
+          print(f"Verified channel resources: {artifact}")
           PY
 
-      - name: Stage Android and CLI artifacts
+      - name: Stage CLI artifact
         shell: bash
         env:
           REPOSITORY_NAME: ${{ github.event.repository.name }}
@@ -246,27 +243,13 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          apks=(composeApp/build/outputs/apk/release/*.apk)
           jars=(overportcli/build/libs/*-all.jar)
-          if (( ${#apks[@]} != 1 )); then
-            echo "Expected exactly one release APK, found ${#apks[@]}." >&2
-            exit 1
-          fi
           if (( ${#jars[@]} != 1 )); then
             echo "Expected exactly one CLI shadow JAR, found ${#jars[@]}." >&2
             exit 1
           fi
           mkdir -p dist
-          cp "${apks[0]}" "dist/$REPOSITORY_NAME-$VERSION-$CHANNEL-android-unsigned.apk"
           cp "${jars[0]}" "dist/$REPOSITORY_NAME-$VERSION-$CHANNEL-cli.jar"
-
-      - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-${{ needs.metadata.outputs.artifact_suffix }}-android
-          path: dist/*-android-unsigned.apk
-          if-no-files-found: error
-          retention-days: 30
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
@@ -276,110 +259,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  desktop:
-    name: Desktop package (${{ matrix.platform }})
-    needs: [metadata, test, vrapi-payload]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            runner: windows-latest
-            format: exe
-            extension: exe
-          - platform: linux
-            runner: ubuntu-latest
-            format: deb
-            extension: deb
-          - platform: macos
-            runner: macos-latest
-            format: dmg
-            extension: dmg
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: temurin
-          cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform compatibility toolchain
-        run: sdkmanager 'ndk;27.3.13750724'
-
-      - name: Grant execute permission for Gradle
-        if: runner.os != 'Windows'
-        run: chmod +x gradlew
-
-      - name: Download experimental adapter
-        if: needs.metadata.outputs.experimental == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: internal-vrapi-${{ needs.metadata.outputs.artifact_suffix }}
-          path: ${{ runner.temp }}/vrapi-resource
-
-      - name: Build stable desktop installer
-        if: needs.metadata.outputs.experimental != 'true'
-        shell: bash
-        run: >-
-          ./gradlew :composeApp:packageReleaseDistributionForCurrentOS
-          -PappVersion=${{ needs.metadata.outputs.version }}
-
-      - name: Build experimental desktop installer
-        if: needs.metadata.outputs.experimental == 'true'
-        shell: bash
-        run: >-
-          ./gradlew :composeApp:packageReleaseDistributionForCurrentOS
-          -PappVersion=${{ needs.metadata.outputs.version }}
-          -PwithVrApi=true
-          -PvrApiResourceRoot="$RUNNER_TEMP/vrapi-resource"
-
-      - name: Stage desktop installer
-        shell: bash
-        env:
-          REPOSITORY_NAME: ${{ github.event.repository.name }}
-          VERSION: ${{ needs.metadata.outputs.version }}
-          CHANNEL: ${{ needs.metadata.outputs.channel }}
-          PLATFORM: ${{ matrix.platform }}
-          FORMAT: ${{ matrix.format }}
-          EXTENSION: ${{ matrix.extension }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          installers=(composeApp/build/compose/binaries/main-release/$FORMAT/*.$EXTENSION)
-          if (( ${#installers[@]} != 1 )); then
-            echo "Expected exactly one $PLATFORM installer, found ${#installers[@]}." >&2
-            exit 1
-          fi
-          mkdir -p dist
-          cp "${installers[0]}" "dist/$REPOSITORY_NAME-$VERSION-$CHANNEL-$PLATFORM.$EXTENSION"
-
-      - name: Upload desktop artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-${{ needs.metadata.outputs.artifact_suffix }}-${{ matrix.platform }}
-          path: dist/*-${{ matrix.platform }}.${{ matrix.extension }}
-          if-no-files-found: error
-          retention-days: 30
-
   draft-release:
     name: Create draft release
     if: needs.metadata.outputs.is_release == 'true'
-    needs: [metadata, portable, desktop]
+    needs: [metadata, cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download release artifacts
+      - name: Download release artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: ${{ github.event.repository.name }}-${{ needs.metadata.outputs.artifact_suffix }}-*
+          pattern: ${{ github.event.repository.name }}-${{ needs.metadata.outputs.artifact_suffix }}-cli
           path: release-assets
           merge-multiple: true
 
@@ -389,8 +280,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           assets=(release-assets/*)
-          if (( ${#assets[@]} != 5 )); then
-            echo "Expected five release assets, found ${#assets[@]}." >&2
+          if (( ${#assets[@]} != 1 )); then
+            echo "Expected one release asset, found ${#assets[@]}." >&2
             exit 1
           fi
 

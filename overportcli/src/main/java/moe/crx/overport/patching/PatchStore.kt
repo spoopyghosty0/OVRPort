@@ -27,6 +27,9 @@ object PatchStore {
 
     fun select(names: Iterable<String>): List<Patch> {
         val requestedNames = names.toList()
+        requestedNames.firstOrNull { it !in PATCHES }?.let {
+            throw IllegalArgumentException("Unknown patch: $it")
+        }
         val selectedNames = requestedNames.toSet()
         require(
             PATCH_VRAPI_OPENXR.name !in selectedNames ||
@@ -34,7 +37,7 @@ object PatchStore {
         ) {
             "${PATCH_VRAPI_OPENXR.name} conflicts with ${PATCH_REMOVE_VRAPI.name}; select only one."
         }
-        return requestedNames.mapNotNull(::get)
+        return requestedNames.map(PATCHES::getValue)
     }
 
     init {

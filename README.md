@@ -1,14 +1,14 @@
 <p align="center"><img src="assets/overport.svg" alt="overport logo"></p>
 
-# OVRPort app
+# OVRPort CLI
 
-OVRPort is a Compose Multiplatform application and command-line tool for
-patching legally obtained Android applications that target Quest headsets so
-they can use supported OpenXR headsets.
+OVRPort is a command-line tool for patching legally obtained Android
+applications that target Quest headsets so they can use supported OpenXR
+headsets.
 
 This repository is a downstream fork of
 [`ovrport/app`](https://github.com/ovrport/app). It preserves the upstream
-patcher and its supported-platform tiers while adding safer multi-platform
+patcher and its supported-platform tiers while adding CLI-only release
 packaging and an **opt-in, experimental** direct VrApi-to-OpenXR compatibility
 path. Builds from this fork are named from the repository that produced them,
 so they are not presented as official upstream releases.
@@ -17,13 +17,13 @@ so they are not presented as official upstream releases.
 
 | Channel | Tag | Contents |
 | --- | --- | --- |
-| Stable | `v<major>.<minor>.<patch>` | The normal OVRPort desktop, Android and CLI packages. The experimental VrApi adapter is not built or packaged. |
-| Experimental | `v<major>.<minor>.<patch>-<prerelease>` (for example, `v1.2.3-vrapi.1`) | The same applications with the project-built VrApi compatibility resource enabled. |
+| Stable | `v<major>.<minor>.<patch>` | The normal OVRPort CLI JAR. The experimental VrApi adapter is not built or packaged. |
+| Experimental | `v<major>.<minor>.<patch>-<prerelease>` (for example, `v1.2.3-vrapi.1`) | The CLI JAR with the project-built VrApi compatibility resource enabled. |
 
 The GitHub Actions release workflow is configured but has not yet been run on
 GitHub. When run manually it can select either channel; a matching tag selects
 stable or experimental automatically. Tagged runs are configured to create a
-**draft** GitHub release for maintainer inspection and signing before manual
+**draft** GitHub release for maintainer inspection before manual
 publication. Release names and artifacts include this repository's name,
 version and channel.
 
@@ -39,8 +39,7 @@ After the selected patches run, the patcher checks the APK's
 `libovrplatformloader.so` dynamic exports. If `ovrMessageType_ToString` is
 missing, it adds the companion as a native dependency and packages it alongside
 the loader. A loader that already defines the public symbol is left unchanged.
-Repeated patching does not add duplicate dependencies. No additional checkbox
-or CLI patch name is required.
+No additional CLI patch name is required.
 
 The companion provides only the SDK's allocation-free message-type-to-string
 mapping, including legacy values and the `UNKNOWN` fallback. It does not
@@ -49,11 +48,11 @@ independent of the experimental VrApi adapter.
 
 ## Experimental direct VrApi compatibility
 
-Experimental builds add the non-recommended `Replace VrApi with experimental OpenXR compatibility layer` patch. It
-replaces an existing arm64-v8a `libvrapi.so` in a selected APK with this
-project's OpenXR-backed compatibility library. The patch is opt-in in both the
-build and the user interface. It fails rather than partially modifying an APK
-when its required arm64 resource is absent or a participating ABI is
+Experimental builds add the non-recommended `Replace VrApi with experimental
+OpenXR compatibility layer` patch. It replaces an existing arm64-v8a
+`libvrapi.so` in a selected APK with this project's OpenXR-backed compatibility
+library. The patch is CLI opt-in. It fails rather than partially modifying an
+APK when its required arm64 resource is absent or a participating ABI is
 unsupported, and it cannot be combined with the patch that removes VrApi.
 
 The initial engineering target is the arm64 Vulkan build of **The Climb 2**
@@ -135,15 +134,8 @@ Users must supply applications they are legally entitled to use.
 
 ## Downloads
 
-The configured workflow is intended to produce these versioned artifacts when
-it is run:
-
-- Windows `.exe` installer
-- Linux `.deb` package
-- macOS `.dmg` image
-- Android release APK (unsigned unless a maintainer supplies signing outside
-  this repository)
-- runnable CLI shadow JAR
+The configured workflow produces one versioned runnable CLI shadow JAR for the
+selected stable or experimental channel.
 
 After the configured workflow has run, use this repository's GitHub
 **Releases** page for tagged draft/released builds or the **Actions** run for
@@ -155,7 +147,7 @@ filename and release title before downloading.
 ### Requirements
 
 - JDK 17
-- Android SDK with platform/API 36 and the normal Android build tools
+- Android SDK command-line tools for installing the pinned NDK
 - Gradle through the included wrapper
 - Python 3 and Android NDK `27.3.13750724` for the automatic native companion
   (and, when enabled, the experimental VrApi adapter)
@@ -164,22 +156,19 @@ Set `ANDROID_NDK_HOME` to that NDK, or install it under an Android SDK exposed
 through `ANDROID_HOME`/`ANDROID_SDK_ROOT`. The native builder can locate either
 layout.
 
-`gradle.properties` is the source of the numeric application version. Desktop
-installer formats require a numeric `major.minor.patch` version; prerelease
-text belongs in the Git tag and artifact metadata, not in `appVersion`.
+`gradle.properties` is the source of the numeric application version.
+Prerelease text belongs in the Git tag and artifact metadata, not in
+`appVersion`.
 
 ### Stable/default build
 
 The default profile does not build or package the experimental adapter:
 
 ```bash
-./gradlew :overportcli:shadowJar :composeApp:assembleRelease \
-  :composeApp:packageReleaseDistributionForCurrentOS
+./gradlew :overportcli:shadowJar
 ```
 
-On Windows, use `gradlew.bat` instead of `./gradlew`. The desktop task emits the
-installer appropriate to the current host: EXE on Windows, DEB on Linux and DMG
-on macOS.
+On Windows, use `gradlew.bat` instead of `./gradlew`.
 
 The platform companion and its SDK/NDK notices are built automatically for
 every profile. To supply a prebuilt resource root instead:
@@ -200,9 +189,7 @@ The root must contain `platform/arm64-v8a/libovrplatformcompat.bin`,
 With NDK `27.3.13750724` installed, the exact opt-in profile is:
 
 ```bash
-./gradlew :overportcli:shadowJar :composeApp:assembleRelease \
-  :composeApp:packageReleaseDistributionForCurrentOS \
-  -PwithVrApi=true
+./gradlew :overportcli:shadowJar -PwithVrApi=true
 ```
 
 That profile builds the native resource automatically. To build it explicitly
@@ -213,8 +200,7 @@ python native/vrapi/build.py \
   --ndk "$ANDROID_NDK_HOME" \
   --output "$PWD/build/vrapi-resource"
 
-./gradlew :overportcli:shadowJar :composeApp:assembleRelease \
-  :composeApp:packageReleaseDistributionForCurrentOS \
+./gradlew :overportcli:shadowJar \
   -PwithVrApi=true \
   -PvrApiResourceRoot="$PWD/build/vrapi-resource"
 ```
@@ -235,35 +221,38 @@ experimental CLI JAR and name it explicitly:
 java -jar <experimental-cli.jar> patches
 java -jar <experimental-cli.jar> patch \
   --input=/path/to/application.apk \
-  --patches=patch_vrapi_openxr
+  --extra-patches=patch_vrapi_openxr
 ```
 
-`--patches` replaces the default recommended selection. To retain other
-desired patches, pass their names in the same quoted, semicolon-separated
-value, for example
-`--patches='patch_vrapi_openxr;another_patch'`. Keep the original APK and
-review the output before installing it.
+`--patches` replaces the default recommended selection. `--extra-patches`
+adds patches after either the defaults or an explicit `--patches` selection.
+Both options use a quoted, semicolon-separated value, for example
+`--extra-patches='patch_vrapi_openxr;another_patch'`. Keep the original APK
+and review the output before installing it.
 
-## Release process and signing
+The former Compose desktop and Android applications have been removed. AXRB
+is the maintained GUI and invokes this CLI as a separately installed process;
+it does not redistribute the CLI or Java. For integrations,
+`java -jar <cli.jar> patches --json` prints a JSON array of `{name, recommended}`
+entries from the patch engine. Unknown patches, duplicate selections and the
+conflicting VrApi replacement/removal combination are rejected before patching.
+
+## Release process
 
 Tags must use `v<major>.<minor>.<patch>[-prerelease]`. A suffix automatically
 selects the experimental channel; a tag without a suffix always selects stable
 and therefore cannot package the experimental native resource. The workflow
-has not yet been run on GitHub. When run, it is configured to execute the test
-suites once before building platform packages, require every expected artifact
-to exist, and upload only those packaged artifacts to the draft release.
+has not yet been run on GitHub. When run, it executes the CLI test suite before
+building, requires the expected JAR to exist, and uploads only that JAR to the
+draft release.
 
 Before publishing a draft, a maintainer must:
 
 1. verify that the tag's numeric version matches `appVersion` in
    `gradle.properties`;
-2. configure and apply Android release signing (the CI APK is intentionally
-   unsigned);
-3. apply any required Windows code signing and Apple signing/notarization using
-   protected repository or environment secrets;
-4. test the installers and, for an experimental release, test patched output on
-   real target hardware; and
-5. review the generated notes and explicitly publish the draft in GitHub.
+2. inspect and test the CLI JAR and, for an experimental release, test patched
+   output on real target hardware; and
+3. review the generated notes and explicitly publish the draft in GitHub.
 
 No signing keys or publishing credentials are committed to the repository.
 
@@ -305,11 +294,11 @@ as stable behavior.
 
 ## Legal, licensing and attribution
 
-Think of this application like an emulator or compatibility tool: you must
-legally obtain the application files you process. Do not use it to distribute
+Think of this tool like an emulator or compatibility utility: you must legally
+obtain the application files you process. Do not use it to distribute
 copyrighted games, proprietary SDKs or vendor libraries.
 
-OVRPort app is licensed under the GNU General Public License v3; see
+OVRPort CLI is licensed under the GNU General Public License v3; see
 [`LICENSE`](LICENSE). The experimental native adapter's pinned OpenXR-SDK
 headers are offered under `Apache-2.0 OR MIT`; this distribution uses the MIT
 option. Statically linked Android NDK runtime portions are covered by the
