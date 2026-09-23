@@ -37,6 +37,12 @@ object PatchStore {
         ) {
             "${PATCH_VRAPI_OPENXR.name} conflicts with ${PATCH_REMOVE_VRAPI.name}; select only one."
         }
+        require(
+            PATCH_AC_NEXUS_NO_APPSW_72.name !in selectedNames ||
+                PATCH_AC_NEXUS_NO_APPSW_90.name !in selectedNames
+        ) {
+            "${PATCH_AC_NEXUS_NO_APPSW_72.name} conflicts with ${PATCH_AC_NEXUS_NO_APPSW_90.name}; select only one."
+        }
         return requestedNames.map(PATCHES::getValue)
     }
 
@@ -64,5 +70,7 @@ object PatchStore {
         register(PATCH_DISABLE_SPACE_WARP)
         register(PATCH_DISABLE_CONTROLLER_OFFSET)
         register(PATCH_DISABLE_META_XR_AUDIO_TELEMETRY)
+        register(PATCH_AC_NEXUS_NO_APPSW_72)
+        register(PATCH_AC_NEXUS_NO_APPSW_90)
     }
 }
