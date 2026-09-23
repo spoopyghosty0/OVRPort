@@ -46,6 +46,18 @@ mapping, including legacy values and the `UNKNOWN` fallback. It does not
 change platform initialization, authentication, or entitlement results, and is
 independent of the experimental VrApi adapter.
 
+## Meta XR Audio telemetry on x86_64 emulators
+
+`patch_disable_meta_xr_audio_telemetry` is optional and not recommended by
+default. Meta XR Audio's Unity plugin creates a telemetry dispatcher that
+loads `libandroid.so` and calls `JNI_GetCreatedJavaVMs` through it. Android's
+ARM64 translation layer on x86_64 emulators has no trampoline for that
+function, so the game aborts with `Bad 'JNI_GetCreatedJavaVMs' call` as its
+audio starts. The patch makes that library load return nothing, which the
+dispatcher already handles by skipping telemetry; audio is unaffected. It
+matches `libMetaXRAudioUnity.so` as shipped in North Star 1.0.1 and leaves any
+other build unchanged.
+
 ## Experimental direct VrApi compatibility
 
 Experimental builds add the non-recommended `Replace VrApi with experimental
