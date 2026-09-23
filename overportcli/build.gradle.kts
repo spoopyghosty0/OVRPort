@@ -41,10 +41,22 @@ val generateAppVersion = tasks.register("generateAppVersion") {
     }
 }
 
+// The CLI runs on whatever Java a player already has, often Java 8 from
+// java.com. Compile for Java 8 whichever JDK builds it; -Xjdk-release also
+// rejects any library call newer than Java 8, not only the class version.
 kotlin {
     sourceSets.main {
         kotlin.srcDir(generatedVersionDirectory)
     }
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
+        freeCompilerArgs.add("-Xjdk-release=1.8")
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 tasks.named("compileKotlin") {

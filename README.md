@@ -158,7 +158,8 @@ filename and release title before downloading.
 
 ### Requirements
 
-- JDK 17
+- JDK 17 or newer. The CLI JAR it builds runs on Java 8 or newer, whichever
+  JDK builds it.
 - Android SDK command-line tools for installing the pinned NDK
 - Gradle through the included wrapper
 - Python 3 and Android NDK `27.3.13750724` for the automatic native companion
