@@ -12,14 +12,14 @@ internal fun ensurePlatformMessageCompatibility(workspace: File) {
 
     val original = loader.readBytes()
     val patched = patchPlatformLoader(original)
-    val companion = libraries.resolve("libovrplatformcompat.so")
-    if (!patched.needsCompanion) return
-
-    val payload = PlatformMessageResource::class.java.getResourceAsStream(PLATFORM_RESOURCE)
-        ?.use { it.readBytes() }
-    require(payload != null && payload.isNotEmpty()) {
-        "Platform message-type compatibility resource is missing or empty: $PLATFORM_RESOURCE"
+    if (patched.needsCompanion) {
+        val companion = libraries.resolve("libovrplatformcompat.so")
+        val payload = PlatformMessageResource::class.java.getResourceAsStream(PLATFORM_RESOURCE)
+            ?.use { it.readBytes() }
+        require(payload != null && payload.isNotEmpty()) {
+            "Platform message-type compatibility resource is missing or empty: $PLATFORM_RESOURCE"
+        }
+        companion.writeBytes(payload)
     }
-    companion.writeBytes(payload)
     if (patched.bytes !== original) loader.writeBytes(patched.bytes)
 }

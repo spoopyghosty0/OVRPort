@@ -99,14 +99,82 @@ class PlatformLoaderElfTest {
         assertContentEquals(malformed, loader)
     }
 
-    private fun elfFixture(exportMessageType: Boolean, withSections: Boolean): ByteArray {
+    @Test
+    fun `unchecked microphone buffer size returns zero before a stream is open`() {
+        val loader = elfFixture(exportMessageType = true, withSections = true, otherSymbol = MICROPHONE_SYMBOL, code = UNCHECKED_BODY)
+        val original = loader.copyOf()
+
+        val result = patchPlatformLoader(loader)
+
+        assertFalse(result.needsCompanion)
+        assertContentEquals(GUARDED_BODY, codeWords(result.bytes, UNCHECKED_BODY.size))
+        assertContentEquals(original.copyOfRange(0, CODE_OFFSET), result.bytes.copyOfRange(0, CODE_OFFSET))
+        val codeEnd = CODE_OFFSET + UNCHECKED_BODY.size * 4
+        assertContentEquals(original.copyOfRange(codeEnd, original.size), result.bytes.copyOfRange(codeEnd, result.bytes.size))
+        assertContentEquals(original, loader)
+    }
+
+    @Test
+    fun `microphone guard is applied together with the companion dependency`() {
+        val loader = elfFixture(exportMessageType = false, withSections = true, otherSymbol = MICROPHONE_SYMBOL, code = UNCHECKED_BODY)
+
+        val result = patchPlatformLoader(loader)
+
+        assertTrue(result.needsCompanion)
+        assertContentEquals(GUARDED_BODY, codeWords(result.bytes, GUARDED_BODY.size))
+        assertEquals(listOf("libc.so", COMPANION), neededLibraries(result.bytes))
+    }
+
+    @Test
+    fun `different microphone buffer size body is left untouched`() {
+        val body = UNCHECKED_BODY.copyOf().apply { this[2] = 0xf940_1000L }
+        val loader = elfFixture(exportMessageType = true, withSections = true, otherSymbol = MICROPHONE_SYMBOL, code = body)
+
+        val result = patchPlatformLoader(loader)
+
+        assertSame(loader, result.bytes)
+        assertContentEquals(body, codeWords(result.bytes, body.size))
+    }
+
+    @Test
+    fun `microphone guard is idempotent`() {
+        val loader = elfFixture(exportMessageType = true, withSections = true, otherSymbol = MICROPHONE_SYMBOL, code = UNCHECKED_BODY)
+
+        val first = patchPlatformLoader(loader)
+        val second = patchPlatformLoader(first.bytes)
+
+        assertSame(first.bytes, second.bytes)
+        assertContentEquals(GUARDED_BODY, codeWords(second.bytes, GUARDED_BODY.size))
+    }
+
+    @Test
+    fun `loader without the microphone export keeps an identical body`() {
+        val loader = elfFixture(exportMessageType = true, withSections = true, code = UNCHECKED_BODY)
+
+        val result = patchPlatformLoader(loader)
+
+        assertSame(loader, result.bytes)
+        assertContentEquals(UNCHECKED_BODY, codeWords(result.bytes, UNCHECKED_BODY.size))
+    }
+
+    private fun codeWords(bytes: ByteArray, count: Int): LongArray {
+        val reader = bytes.reader()
+        return LongArray(count) { index -> reader.getInt(CODE_OFFSET + index * 4).toLong() and 0xffff_ffffL }
+    }
+
+    private fun elfFixture(
+        exportMessageType: Boolean,
+        withSections: Boolean,
+        otherSymbol: String = OTHER_SYMBOL,
+        code: LongArray? = null,
+    ): ByteArray {
         val strings = byteArrayOf(0) +
             MESSAGE_SYMBOL.toByteArray(Charsets.US_ASCII) + byteArrayOf(0) +
-            OTHER_SYMBOL.toByteArray(Charsets.US_ASCII) + byteArrayOf(0) +
+            otherSymbol.toByteArray(Charsets.US_ASCII) + byteArrayOf(0) +
             "libc.so".toByteArray(Charsets.US_ASCII) + byteArrayOf(0)
         val messageNameOffset = 1
         val otherNameOffset = messageNameOffset + MESSAGE_SYMBOL.length + 1
-        val neededNameOffset = otherNameOffset + OTHER_SYMBOL.length + 1
+        val neededNameOffset = otherNameOffset + otherSymbol.length + 1
         val sectionOffset = if (withSections) SECTION_TABLE_OFFSET else 0
         val fileSize = if (withSections) SECTION_TABLE_OFFSET + SECTION_COUNT * SECTION_HEADER_SIZE else BASE_FILE_SIZE
         val bytes = ByteArray(fileSize)
@@ -161,8 +229,10 @@ class PlatformLoaderElfTest {
         writer.putInt(SYMTAB_OFFSET + 2 * SYMBOL_SIZE, otherNameOffset)
         bytes[SYMTAB_OFFSET + 2 * SYMBOL_SIZE + 4] = 0x12
         writer.putShort(SYMTAB_OFFSET + 2 * SYMBOL_SIZE + 6, 4.toShort())
+        writer.putLong(SYMTAB_OFFSET + 2 * SYMBOL_SIZE + 8, CODE_OFFSET.toLong())
+        code?.forEachIndexed { index, word -> writer.putInt(CODE_OFFSET + index * 4, word.toInt()) }
 
-        val hashedSymbols = if (exportMessageType) listOf(MESSAGE_SYMBOL, OTHER_SYMBOL) else listOf(OTHER_SYMBOL)
+        val hashedSymbols = if (exportMessageType) listOf(MESSAGE_SYMBOL, otherSymbol) else listOf(otherSymbol)
         val firstHashedSymbol = 3 - hashedSymbols.size
         val bloomShift = 5
         val hashes = hashedSymbols.map(::gnuHash)
@@ -338,7 +408,7 @@ class PlatformLoaderElfTest {
         const val SYMBOL_SIZE = 24
         const val PROGRAM_TABLE_OFFSET = 64
         const val PROGRAM_COUNT = 6
-        const val STRTAB_OFFSET = 0x200
+        const val STRTAB_OFFSET = 0x1a0
         const val SYMTAB_OFFSET = 0x240
         const val GNU_HASH_OFFSET = 0x2a0
         const val DYNAMIC_OFFSET = 0x300
@@ -349,6 +419,7 @@ class PlatformLoaderElfTest {
         const val BASE_FILE_SIZE = 0x600
         const val SECTION_TABLE_OFFSET = 0x600
         const val SECTION_COUNT = 5
+        const val CODE_OFFSET = 0x400
         const val PAGE_SIZE = 0x1000L
 
         const val ET_DYN = 3
@@ -375,5 +446,13 @@ class PlatformLoaderElfTest {
         const val MESSAGE_SYMBOL = "ovrMessageType_ToString"
         const val OTHER_SYMBOL = "other_export"
         const val COMPANION = "libovrplatformcompat.so"
+        const val MICROPHONE_SYMBOL = "ovr_Microphone_GetOutputBufferMaxSize"
+        const val FRAMES_PER_BURST_CALL = 0x97ff_ff00L
+        val UNCHECKED_BODY = longArrayOf(
+            0xa9bf_7bfdL, 0x9100_03fdL, 0xf940_0c00L, FRAMES_PER_BURST_CALL, 0x9340_7c00L, 0xa8c1_7bfdL, 0xd65f_03c0L,
+        )
+        val GUARDED_BODY = longArrayOf(
+            0xf940_0c00L, 0xb400_00a0L, 0xa9bf_7bfdL, FRAMES_PER_BURST_CALL, 0xa8c1_7bfdL, 0x9340_7c00L, 0xd65f_03c0L,
+        )
     }
 }

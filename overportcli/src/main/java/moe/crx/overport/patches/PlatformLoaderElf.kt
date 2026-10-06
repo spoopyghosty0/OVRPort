@@ -9,12 +9,14 @@ internal data class PlatformLoaderPatch(
 )
 
 internal fun patchPlatformLoader(bytes: ByteArray): PlatformLoaderPatch {
-    val elf = PlatformLoaderElf(bytes)
+    val original = PlatformLoaderElf(bytes)
+    val guarded = original.guardMicrophoneBufferSize()
+    val elf = if (guarded === bytes) original else PlatformLoaderElf(guarded)
     if (elf.definesMessageTypeToString()) {
-        return PlatformLoaderPatch(bytes, false)
+        return PlatformLoaderPatch(guarded, false)
     }
     if (elf.needsCompanionAlready()) {
-        return PlatformLoaderPatch(bytes, true)
+        return PlatformLoaderPatch(guarded, true)
     }
     return PlatformLoaderPatch(elf.addCompanionDependency(), true)
 }
@@ -116,11 +118,45 @@ private class PlatformLoaderElf(private val source: ByteArray) {
         validateDynamicSymbols()
     }
 
-    fun definesMessageTypeToString(): Boolean {
+    fun definesMessageTypeToString(): Boolean = definedSymbolOffset(MESSAGE_TYPE_SYMBOL) != null
+
+    /*
+     * ovr_Microphone_Create only allocates the handle; the AAudio input stream is opened later by
+     * ovr_Microphone_Start. Meta's loader allows asking for the buffer size in between (Unreal's
+     * Oculus voice code does), but this loader passes the still-NULL stream straight to
+     * AAudioStream_getFramesPerBurst, which crashes inside libaaudio. Only the exact unchecked body
+     * is rewritten, in place and at the same size, so it returns 0 until a stream is open. The bl
+     * stays at the same address, so its PC-relative target is unchanged.
+     */
+    fun guardMicrophoneBufferSize(): ByteArray {
+        val symbol = definedSymbolOffset(MICROPHONE_BUFFER_SIZE_SYMBOL) ?: return source
+        val address = reader.u64(symbol + 8, "dynamic symbol value")
+        val size = UNCHECKED_BUFFER_SIZE_BODY.size * 4L
+        val offset = loadedFileOffsetOrNull(address, size) ?: return source
+        val words = LongArray(UNCHECKED_BUFFER_SIZE_BODY.size) { reader.u32(offset + it * 4) }
+        val matches = words.indices.all { index ->
+            if (index == BUFFER_SIZE_CALL_INDEX) {
+                words[index] and AARCH64_BL_MASK == AARCH64_BL
+            } else {
+                words[index] == UNCHECKED_BUFFER_SIZE_BODY[index]
+            }
+        }
+        if (!matches) return source
+
+        val output = source.copyOf()
+        val writer = ElfWriter(output)
+        GUARDED_BUFFER_SIZE_BODY.forEachIndexed { index, word ->
+            val value = if (index == BUFFER_SIZE_CALL_INDEX) words[BUFFER_SIZE_CALL_INDEX] else word
+            writer.putU32(offset + index * 4, value)
+        }
+        return output
+    }
+
+    private fun definedSymbolOffset(name: String): Int? {
         for (index in 0 until symbolCount) {
             val offset = symbolTableOffset + index * SYMBOL_SIZE
             val nameIndex = reader.u32(offset).toLong()
-            if (dynamicString(nameIndex, "dynamic symbol $index") != MESSAGE_TYPE_SYMBOL) continue
+            if (dynamicString(nameIndex, "dynamic symbol $index") != name) continue
 
             val binding = reader.u8(offset + 4) ushr 4
             val visibility = reader.u8(offset + 5) and 0x3
@@ -133,9 +169,9 @@ private class PlatformLoaderElf(private val source: ByteArray) {
             } else {
                 sectionIndex.toLong()
             }
-            if (resolvedSectionIndex != SHN_UNDEF.toLong()) return true
+            if (resolvedSectionIndex != SHN_UNDEF.toLong()) return offset
         }
-        return false
+        return null
     }
 
     fun needsCompanionAlready(): Boolean = dynamicEntries
@@ -589,6 +625,15 @@ private class PlatformLoaderElf(private val source: ByteArray) {
         return reader.fileRange(offset, size, owner)
     }
 
+    private fun loadedFileOffsetOrNull(address: Long, size: Long): Int? {
+        val header = programHeaders.singleOrNull {
+            it.type == PT_LOAD && address >= it.virtualAddress && it.fileSize >= size &&
+                address - it.virtualAddress <= it.fileSize - size
+        } ?: return null
+        val offset = header.offset + (address - header.virtualAddress)
+        return if (offset <= source.size.toLong() - size) offset.toInt() else null
+    }
+
     private fun writeProgramHeader(writer: ElfWriter, offset: Int, header: ProgramHeader) {
         writer.putU32(offset, header.type)
         writer.putU32(offset + 4, header.flags)
@@ -777,3 +822,20 @@ private const val STV_PROTECTED = 3
 
 private const val MESSAGE_TYPE_SYMBOL = "ovrMessageType_ToString"
 private const val COMPANION_SONAME = "libovrplatformcompat.so"
+private const val MICROPHONE_BUFFER_SIZE_SYMBOL = "ovr_Microphone_GetOutputBufferMaxSize"
+
+private const val BUFFER_SIZE_CALL_INDEX = 3
+private const val AARCH64_BL = 0x9400_0000L
+private const val AARCH64_BL_MASK = 0xfc00_0000L
+
+// stp x29, x30, [sp, #-16]!; mov x29, sp; ldr x0, [x0, #0x18]; bl AAudioStream_getFramesPerBurst;
+// sxtw x0, w0; ldp x29, x30, [sp], #16; ret
+private val UNCHECKED_BUFFER_SIZE_BODY = longArrayOf(
+    0xa9bf_7bfdL, 0x9100_03fdL, 0xf940_0c00L, AARCH64_BL, 0x9340_7c00L, 0xa8c1_7bfdL, 0xd65f_03c0L,
+)
+
+// ldr x0, [x0, #0x18]; cbz x0, ret; stp x29, x30, [sp, #-16]!; bl AAudioStream_getFramesPerBurst;
+// ldp x29, x30, [sp], #16; sxtw x0, w0; ret
+private val GUARDED_BUFFER_SIZE_BODY = longArrayOf(
+    0xf940_0c00L, 0xb400_00a0L, 0xa9bf_7bfdL, AARCH64_BL, 0xa8c1_7bfdL, 0x9340_7c00L, 0xd65f_03c0L,
+)
