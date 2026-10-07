@@ -340,6 +340,14 @@ bool ensureOutputGl(ovrTextureSwapChain* chain) {
     }
     auto exposed = [&](int64_t f) { return std::find(formats.begin(), formats.begin() + formatCount, f) != formats.begin() + formatCount; };
     int64_t wanted = chain->glInternalFormat;
+    if (!exposed(wanted) && (wanted == GL_RGBA8 || wanted == GL_SRGB8_ALPHA8)) {
+        // glCopyImageSubData copies raw texels between these size-compatible formats.
+        const int64_t twin = wanted == GL_RGBA8 ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+        if (exposed(twin)) {
+            OVP_LOG("Runtime lacks GL format 0x%llx; using compatible 0x%llx", (long long)wanted, (long long)twin);
+            wanted = twin;
+        }
+    }
     if (!exposed(wanted)) {
         OVP_ERROR("OpenXR runtime does not expose GL format 0x%llx", (long long)wanted);
         return false;
